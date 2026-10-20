@@ -1,0 +1,29 @@
+﻿# Build outputs
+build/
+bin/
+out/
+*.class
+*.o
+*.obj
+
+# Android / Gradle / IDE
+.gradle/
+.idea/
+*.iml
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db

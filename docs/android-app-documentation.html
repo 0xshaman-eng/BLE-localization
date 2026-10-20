@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BLE Tool Tracking – Android Application Documentation</title>
+<style>
+:root{--bg:#f8f9fa;--card:#fff;--primary:#1a73e8;--primary-light:#e8f0fe;--text:#202124;--text2:#5f6368;--border:#dadce0;--code-bg:#f5f5f5;--success:#34a853;--warn:#f9ab00;--err:#ea4335;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.7;max-width:1100px;margin:0 auto;padding:24px;}
+h1{font-size:28px;margin:32px 0 8px;border-bottom:3px solid var(--primary);padding-bottom:8px;}
+h2{font-size:22px;margin:28px 0 8px;color:var(--primary);}
+h3{font-size:17px;margin:20px 0 6px;}
+h4{font-size:15px;margin:16px 0 4px;color:var(--text2);}
+p,li{font-size:15px;margin-bottom:8px;}
+ul,ol{padding-left:24px;margin-bottom:12px;}
+code{font-family:'Consolas','Fira Code',monospace;font-size:13px;background:var(--code-bg);padding:2px 6px;border-radius:3px;}
+pre{background:#1e1e1e;color:#d4d4d4;padding:16px;border-radius:8px;overflow-x:auto;margin:12px 0;font-size:13px;line-height:1.5;}
+pre code{background:none;padding:0;color:inherit;}
+.kw{color:#569cd6;}.st{color:#ce9178;}.cm{color:#6a9955;}.fn{color:#dcdcaa;}.num{color:#b5cea8;}.ann{color:#d7ba7d;}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px 20px;margin:12px 0;}
+.term{background:var(--primary-light);border-left:4px solid var(--primary);padding:12px 16px;margin:12px 0;border-radius:0 6px 6px 0;}
+.term strong{color:var(--primary);}
+.warn{background:#fef7e0;border-left:4px solid var(--warn);padding:12px 16px;margin:12px 0;border-radius:0 6px 6px 0;}
+.diagram{background:#fff;border:2px solid var(--border);border-radius:8px;padding:20px;margin:16px 0;font-family:'Consolas',monospace;font-size:13px;white-space:pre;overflow-x:auto;line-height:1.6;}
+table{width:100%;border-collapse:collapse;margin:12px 0;}
+th,td{border:1px solid var(--border);padding:8px 12px;text-align:left;font-size:14px;}
+th{background:var(--primary-light);font-weight:600;}
+.toc{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:20px;margin:20px 0;}
+.toc a{color:var(--primary);text-decoration:none;display:block;padding:3px 0;}
+.toc a:hover{text-decoration:underline;}
+.toc-h3{margin-left:20px;font-size:14px;}
+</style>
+</head>
+<body>
+<h1>BLE Tool Tracking System – Android Application</h1>
+<p>Complete architectural documentation for the Android BLE scanning application that detects, identifies, and tracks physical tools fitted with BLE tags. This system is designed to support <strong>many types</strong> of BLE tags — not just one vendor.</p>
+
+<div class="term">
+<strong>What is BLE?</strong> Bluetooth Low Energy is a wireless technology that lets small battery-powered devices (called <em>tags</em>) broadcast tiny packets of data. A nearby phone can pick up these broadcasts, identify the tag, and record where and when it was seen.
+</div>
+
+<div class="toc">
+<strong>Table of Contents</strong>
+<a href="#s1">1. System Overview</a>
+<a href="#s2">2. Project Structure &amp; Tech Stack</a>
+<a href="#s3">3. Application Lifecycle &amp; Boot Behaviour</a>
+<a href="#s4">4. BLE Scanning Architecture</a>
+<a href="#s5">5. Packet Parsing &amp; Tag Identification</a>
+<a href="#s6">6. Batch Processing &amp; Location Updates</a>
+<a href="#s7">7. Firebase Data Structures</a>
+<a href="#s8">8. Tag UUID Encoding &amp; Decoding</a>
+<a href="#s9">9. UI Screens &amp; User Flows</a>
+<a href="#s10">10. Dependency Injection</a>
+<a href="#s11">11. Data Layer &amp; ViewModels</a>
+<a href="#s12">12. Background Execution Strategies</a>
+</div>
+
+<!-- ===== SECTION 1 ===== -->
+<h2 id="s1">1. System Overview</h2>
+<p>This application is one half of a two-part system for tracking physical tools (drills, hammers, grinders — any equipment) on job sites. Each tool is fitted with a small BLE tag that continuously broadcasts a unique identifier. The Android app runs in the background, listens for these broadcasts, determines the phone's GPS location, and uploads both pieces of data to a cloud database. A separate web dashboard then displays all tools on a live map.</p>
+<p>The system is designed to support <strong>many types of BLE tags from different manufacturers</strong>. Currently two tag families are implemented (Hilti and ELA), but the architecture makes adding new tag types straightforward — just write a new packet parser and add a scan filter.</p>
+
+<div class="term">
+<strong>Anchor:</strong> Each Android phone running the app is called an <em>anchor</em>. Multiple anchors can be deployed across a large site; each one independently detects tags in its vicinity and reports them. The dashboard then picks the best report using a winner selection algorithm.
+</div>
+
+<div class="diagram">
+┌──────────────┐      BLE broadcasts       ┌────────────────────┐
+│  BLE Tag     │ ─────────────────────────▶ │  Android App       │
+│  (on a tool) │                            │  (Anchor)          │
+└──────────────┘                            │                    │
+                                            │  1. Parse packet   │
+┌──────────────┐      BLE broadcasts        │  2. Identify tag   │
+│  BLE Tag     │ ─────────────────────────▶ │  3. Get GPS coords │
+│  (on a tool) │                            │  4. Upload to DB   │
+└──────────────┘                            └────────┬───────────┘
+                                                     │  HTTPS
+                                                     ▼
+                                            ┌────────────────────┐
+                                            │  Firebase Realtime │
+                                            │  Database (Cloud)  │
+                                            └────────┬───────────┘
+                                                     │
+                                                     ▼
+                                            ┌────────────────────┐
+                                            │  Web Dashboard     │
+                                            │  (Leaflet Map)     │
+                                            └────────────────────┘
+</div>
+
+<h3>1.1 Supported Tag Types</h3>
+<p>The system currently supports two BLE tag families, with the architecture ready for more:</p>
+<table>
+<tr><th>Tag Family</th><th>Manufacturer</th><th>MFC ID</th><th>ID Format</th><th>Example</th></tr>
+<tr><td>Hilti ON!Track</td><td>Hilti</td><td>780</td><td>12-char hex (<code>d32218666c12</code>)</td><td>Barcode: 309257752</td></tr>
+<tr><td>ELA Blue Coin</td><td>ELA Innovation</td><td>1879</td><td>"C ID" + 6 hex chars</td><td>Label: CID015E58</td></tr>
+<tr><td>EM Microelectronic</td><td>EM</td><td>90</td><td>12-char hex MAC</td><td>Label: 194536388608856</td></tr>
+<tr><td><em>Test</em></td><td>—</td><td>67</td><td>Development only</td><td>—</td></tr>
+</table>
+<p>Adding a new tag type requires: (a) a new <code>*PacketParser</code> class, (b) a new <code>ScanFilter</code> entry, and (c) display/conversion helpers.</p>
+
+<!-- ===== SECTION 2 ===== -->
+<h2 id="s2">2. Project Structure &amp; Tech Stack</h2>
+
+<h3>2.1 Technology Stack</h3>
+<table>
+<tr><th>Technology</th><th>What It Is</th><th>Why It's Used</th></tr>
+<tr><td>Kotlin</td><td>Modern programming language for Android</td><td>Concise, null-safe, recommended by Google</td></tr>
+<tr><td>Jetpack Compose</td><td>Declarative UI toolkit — you describe <em>what</em> to show, the framework handles <em>how</em></td><td>Less code, automatic UI updates when data changes</td></tr>
+<tr><td>Firebase Realtime Database</td><td>A cloud-hosted database that syncs data across all connected clients in real time</td><td>No backend server needed; changes appear on the dashboard instantly</td></tr>
+<tr><td>Hilt (Dagger)</td><td>Dependency Injection framework — automatically provides shared objects where needed</td><td>One BLE scanner instance shared across entire app (see §10)</td></tr>
+<tr><td>WorkManager</td><td>Background task scheduler that survives app restarts and reboots</td><td>Reliable periodic location updates</td></tr>
+<tr><td>CameraX + ML Kit</td><td>Camera API + Google's barcode recognition library</td><td>Scan barcodes printed on physical tags to map them to tools</td></tr>
+<tr><td>OSMDroid</td><td>OpenStreetMap library for Android</td><td>Display tool locations on a map (works offline too)</td></tr>
+<tr><td>FusedLocationProvider</td><td>Google Play Services location API</td><td>Battery-efficient, high-accuracy GPS coordinates</td></tr>
+</table>
+
+<h3>2.2 Source Layout</h3>
+<pre><code>HILTIBLE/app/src/main/
+├── AndroidManifest.xml          <span class="cm">// Permissions &amp; component declarations</span>
+├── java/com/example/hiltible/
+│   ├── HiltiBleApplication.kt  <span class="cm">// App class (DI + WorkManager init)</span>
+│   ├── MainActivity.kt         <span class="cm">// Entry point, permissions, navigation</span>
+│   ├── BootReceiver.kt         <span class="cm">// Starts service on device reboot</span>
+│   ├── ble/
+│   │   ├── BleTagDetector.kt   <span class="cm">// Core scanner, batch processor, Firebase writer</span>
+│   │   ├── HiltiPacketParser.kt<span class="cm">// Parses Hilti BLE packets</span>
+│   │   └── ElaPacketParser.kt  <span class="cm">// Parses ELA BLE packets</span>
+│   ├── data/
+│   │   ├── entity/Tool.kt      <span class="cm">// Tool data model</span>
+│   │   └── repository/ToolRepository.kt <span class="cm">// Firebase CRUD operations</span>
+│   ├── di/DatabaseModule.kt    <span class="cm">// Hilt dependency definitions</span>
+│   ├── service/
+│   │   └── BleTrackingService.kt <span class="cm">// Foreground service for BLE scanning</span>
+│   ├── ui/
+│   │   ├── screen/
+│   │   │   ├── MapScreen.kt          <span class="cm">// Map view of all tools</span>
+│   │   │   ├── ToolsListScreen.kt    <span class="cm">// List of registered tools</span>
+│   │   │   ├── TagMappingScreen.kt   <span class="cm">// BLE/barcode scan to map tag</span>
+│   │   │   └── BarcodeScanScreen.kt  <span class="cm">// Camera barcode scanner</span>
+│   │   └── viewmodel/
+│   │       ├── TagMappingViewModel.kt
+│   │       └── ToolsListViewModel.kt
+│   └── work/
+│       └── LocationUpdateWorker.kt <span class="cm">// WorkManager task for location</span>
+└── res/                         <span class="cm">// Icons, strings, themes</span>
+</code></pre>
+
+<!-- ===== SECTION 3 ===== -->
+<h2 id="s3">3. Application Lifecycle &amp; Boot Behaviour</h2>
+
+<div class="term">
+<strong>What is a Foreground Service?</strong> Android normally kills background apps to save battery. A <em>foreground service</em> is a special mode where the app shows a persistent notification and the system promises not to kill it. This is required for continuous BLE scanning.
+</div>
+
+<h3>3.1 Startup Sequence</h3>
+<div class="diagram">
+Device boots / App launched
+        │
+        ▼
+HiltiBleApplication.onCreate()
+  └─ Initialise Hilt dependency injection
+  └─ Configure WorkManager with HiltWorkerFactory
+        │
+        ▼
+MainActivity.onCreate()
+  └─ Request permissions (Bluetooth, Location, Camera, Notifications)
+  └─ If granted → requestBackgroundLocation()
+  └─ If all granted → startTrackingService()
+        │
+        ▼
+BleTrackingService.onStartCommand()
+  └─ Start foreground notification
+  └─ bleTagDetector.refreshTagCache()     ← load tag→tool mappings
+  └─ bleTagDetector.startScanning()       ← begin BLE scan
+  └─ Start periodic BLE scan restart      ← every 60 s
+  └─ Start periodic WakeLock refresh      ← every 8 min
+  └─ Acquire WakeLock                     ← keep CPU awake
+</div>
+
+<h3>3.2 Permission Model</h3>
+<table>
+<tr><th>Permission</th><th>Why Needed</th><th>When Requested</th></tr>
+<tr><td><code>BLUETOOTH_SCAN</code></td><td>Detect nearby BLE devices</td><td>On first launch</td></tr>
+<tr><td><code>BLUETOOTH_CONNECT</code></td><td>Read device names from scan results</td><td>On first launch</td></tr>
+<tr><td><code>ACCESS_FINE_LOCATION</code></td><td>GPS coordinates + BLE scanning requirement</td><td>On first launch</td></tr>
+<tr><td><code>ACCESS_BACKGROUND_LOCATION</code></td><td>Scan when screen is off</td><td>After basic permissions granted</td></tr>
+<tr><td><code>CAMERA</code></td><td>Barcode scanning via camera</td><td>When entering barcode scan screen</td></tr>
+<tr><td><code>POST_NOTIFICATIONS</code></td><td>Show foreground service notification (Android 13+)</td><td>On first launch</td></tr>
+</table>
+
+<div class="warn">
+<strong>Background Location:</strong> Android 11+ requires background location to be requested <em>separately</em> from foreground location. The user must choose "Allow all the time" in system settings. The app shows an explanatory dialog before this request.
+</div>
+
+<h3>3.3 Boot Receiver</h3>
+<p>The <code>BootReceiver</code> ensures the tracking service starts automatically when the device reboots (<code>ACTION_BOOT_COMPLETED</code>) or the app is updated (<code>ACTION_MY_PACKAGE_REPLACED</code>).</p>
+<pre><code><span class="kw">class</span> BootReceiver : BroadcastReceiver() {
+    <span class="kw">override fun</span> <span class="fn">onReceive</span>(context: Context, intent: Intent) {
+        <span class="kw">val</span> serviceIntent = Intent(context, BleTrackingService::<span class="kw">class</span>.java)
+        context.startForegroundService(serviceIntent)
+    }
+}
+</code></pre>
+
+<h3>3.4 Battery Optimisation Exemption</h3>
+<div class="term">
+<strong>What is Battery Optimisation?</strong> Android aggressively limits what apps can do in the background to save battery. The app requests an exemption so scanning can continue. Without this, the system may pause the service after minutes of inactivity.
+</div>
+<p>On first launch, <code>MainActivity</code> requests <code>ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS</code>. This shows a system dialog; the request is made only once.</p>
+
+<h3>3.5 Service Persistence</h3>
+<ul>
+<li><strong><code>START_STICKY</code></strong> — tells Android to restart the service if it's killed for memory</li>
+<li><strong><code>onTaskRemoved()</code></strong> — if the user swipes the app away, the service restarts itself</li>
+<li><strong><code>onResume()</code></strong> — when the app comes to the foreground, <code>ensureServiceRunning()</code> re-starts the service if stopped</li>
+</ul>
+
+<!-- ===== SECTION 4 ===== -->
+<h2 id="s4">4. BLE Scanning Architecture</h2>
+
+<div class="term">
+<strong>What is a Scan Filter?</strong> A scan filter tells the Android Bluetooth stack: "Only notify me about BLE devices that match these criteria." By filtering on a manufacturer's registered numeric ID, the app only receives packets from known tag types. This also enables scanning when the screen is off (see §4.1).
+</div>
+
+<h3>4.1 Why Manufacturer Filters Are Required</h3>
+<p>Starting with Android 8.1, the operating system <strong>blocks unfiltered BLE scans when the screen is off</strong>. If you start a scan without filters, it silently stops producing results the moment the screen turns off. By providing <code>ScanFilter</code> objects, the Bluetooth <em>hardware</em> (not the CPU) continues matching packets, so scanning works even in deep sleep.</p>
+
+<div class="card">
+<strong>Current filters:</strong>
+<ol>
+<li><strong>Hilti filter</strong> – Manufacturer ID <code>780</code> (0x030C)</li>
+<li><strong>ELA filter</strong> – Manufacturer ID <code>1879</code> (0x0757)</li>
+<li><strong>EM filter</strong> – Manufacturer ID <code>90</code> (0x005A)</li>
+<li><strong>Test filter</strong> – Manufacturer ID <code>67</code> (development)</li>
+</ol>
+<p>To add a new tag type, create <code>ScanFilter.Builder().setManufacturerData(NEW_ID, byteArrayOf()).build()</code> and add it to the filter list.</p>
+</div>
+
+<h3>4.2 Scan Settings</h3>
+<div class="term">
+<strong>What are Scan Settings?</strong> They control <em>how aggressively</em> the Bluetooth radio scans:
+<ul>
+<li><strong>LOW_POWER</strong> – scans infrequently; best battery life but slow detection</li>
+<li><strong>BALANCED</strong> – moderate rate</li>
+<li><strong>LOW_LATENCY</strong> – scans as fast as possible; more battery but detects tags within milliseconds</li>
+</ul>
+This app uses <strong>LOW_LATENCY</strong> because timely detection is critical for accurate tracking.
+</div>
+
+<pre><code><span class="kw">val</span> scanSettings = ScanSettings.Builder()
+    .setScanMode(ScanSettings.<span class="fn">SCAN_MODE_LOW_LATENCY</span>)  <span class="cm">// Fastest detection</span>
+    .setReportDelay(<span class="num">0</span>)                                <span class="cm">// Report each result immediately</span>
+    .build()
+</code></pre>
+<p><code>setReportDelay(0)</code> means each detected packet triggers the callback immediately rather than being batched by the hardware.</p>
+
+<h3>4.3 Scan Callback Flow</h3>
+<div class="diagram">
+BLE Packet Arrives (matches a filter)
+        │
+        ▼
+scanCallback.onScanResult()
+  │
+  ├─ Extract manufacturerSpecificData
+  ├─ Record detection time (millisecond precision)
+  │
+  ├─ MFC ID == 780 (Hilti)?
+  │   └─ YES → HiltiPacketParser.parse(data)
+  │           └─ Extract 6-byte tag UUID
+  │           └─ Store in pendingTags + tagTypes ("hilti") + tagRssiMap + tagDetectionTimes
+  │
+  ├─ MFC ID == 1879 (ELA)?
+  │   └─ YES → ElaPacketParser.parse(data, scanRecord)
+  │           └─ Check DataInfo byte == 0x06
+  │           └─ Extract C ID from device name
+  │           └─ Normalise to "C ID XXXXXX"
+  │           └─ Store in pendingTags + tagTypes ("ela") + tagRssiMap + tagDetectionTimes
+  │
+  ├─ MFC ID == 90 (EM)?
+  │   └─ YES → EmPacketParser.parse(data, device)
+  │           └─ Verify AltBeacon signature (0xBEAC)
+  │           └─ Extract protocol-level MAC address
+  │           └─ Store in pendingTags + tagTypes ("em") + tagRssiMap + tagDetectionTimes
+  │
+  └─ MFC ID == 67 (Test)?
+      └─ YES → Use Hilti parser (for development)
+</div>
+
+<h3>4.4 BLE Tracking Service</h3>
+<div class="term">
+<strong>What is a Foreground Service Type?</strong> Android 14+ requires services to declare <em>what</em> they do. This app declares:
+<ul>
+<li><code>CONNECTED_DEVICE</code> – it communicates with Bluetooth hardware</li>
+<li><code>LOCATION</code> – it accesses GPS</li>
+</ul>
+</div>
+
+<p><code>BleTrackingService</code> is a <code>LifecycleService</code> that:</p>
+<ol>
+<li>Creates a notification channel and shows a persistent notification ("Scanning for tags…")</li>
+<li>Injects and starts <code>BleTagDetector</code></li>
+<li>Manages three periodic jobs:
+  <ul>
+    <li><strong>BLE Scan Restart</strong> – every 60 seconds, stops and restarts the scan to work around Android silently stopping long-running scans</li>
+    <li><strong>WakeLock Refresh</strong> – every 8 minutes, releases and re-acquires the WakeLock</li>
+    <li><strong>Screen state monitoring</strong> – a <code>ScreenOffReceiver</code> updates the notification text when the screen toggles</li>
+  </ul>
+</li>
+</ol>
+
+<h3>4.5 WakeLock Management</h3>
+<div class="term">
+<strong>What is a WakeLock?</strong> When the screen is off, Android puts the CPU into low-power sleep. A <em>WakeLock</em> tells the system: "Keep the CPU running." Without it, the BLE scan callback stops being invoked. A <code>PARTIAL_WAKE_LOCK</code> keeps the CPU on but lets the screen stay off — the most battery-efficient option that still allows scanning.
+</div>
+
+<pre><code><span class="kw">val</span> wakeLock = powerManager.newWakeLock(
+    PowerManager.<span class="fn">PARTIAL_WAKE_LOCK</span>,
+    <span class="st">"BLETrackingService:WakeLock"</span>
+)
+wakeLock.acquire(<span class="num">10 * 60 * 1000L</span>) <span class="cm">// 10-minute timeout</span>
+</code></pre>
+<p>Because Android may release WakeLocks after their timeout, the service refreshes every 8 minutes (release → wait 1 second → re-acquire), creating overlapping 10-minute windows for continuous CPU availability.</p>
+
+<!-- ===== SECTION 5 ===== -->
+<h2 id="s5">5. Packet Parsing &amp; Tag Identification</h2>
+<p>Each BLE tag type broadcasts data in a different format. A <em>packet parser</em> reads raw bytes from a BLE advertisement and extracts a unique tag identifier. Adding support for a new tag family means writing a new parser.</p>
+
+<h3>5.1 Hilti Packet Parser</h3>
+<div class="term">
+<strong>What is Manufacturer Specific Data?</strong> BLE advertisements can contain a section of bytes defined by the tag manufacturer. The first 2 bytes are a registered company ID (e.g. 780 for Hilti). The remaining bytes hold whatever the manufacturer chose — in Hilti's case, a 6-byte tag UUID.
+</div>
+
+<table>
+<tr><th>Field</th><th>Value</th></tr>
+<tr><td>Manufacturer ID</td><td><code>780</code> (0x030C)</td></tr>
+<tr><td>Minimum payload</td><td>8 bytes</td></tr>
+<tr><td>UUID location</td><td>Bytes 2–7 (6 bytes)</td></tr>
+<tr><td>UUID format</td><td>12-character lowercase hex string</td></tr>
+</table>
+
+<pre><code><span class="cm">// Example: Manufacturer data = [.., .., 0xd3, 0x22, 0x18, 0x66, 0x6c, 0x12]</span>
+<span class="cm">//   Bytes 2-7 → d3 22 18 66 6c 12 → Tag UUID: "d32218666c12"</span>
+
+<span class="kw">object</span> HiltiPacketParser {
+    <span class="kw">const val</span> MANUFACTURER_ID = <span class="num">780</span>
+
+    <span class="kw">fun</span> <span class="fn">parse</span>(manufacturerData: ByteArray): HiltiPacket? {
+        <span class="kw">if</span> (manufacturerData.size &lt; <span class="num">8</span>) <span class="kw">return null</span>
+        <span class="kw">val</span> uuidBytes = manufacturerData.copyOfRange(<span class="num">2</span>, <span class="num">8</span>)
+        <span class="kw">val</span> tagUuid = uuidBytes.joinToString(<span class="st">""</span>) { <span class="st">"%02x"</span>.format(it) }
+        <span class="kw">return</span> HiltiPacket(tagUuid)
+    }
+}
+</code></pre>
+
+<h3>5.2 ELA Packet Parser</h3>
+<p>ELA Blue Coin tags use a different structure. The manufacturer data contains a <em>DataInfo</em> byte, and the actual tag ID is carried in the BLE advertisement's <strong>Complete Local Name</strong> (a human-readable string broadcast by the tag).</p>
+
+<table>
+<tr><th>Field</th><th>Value</th></tr>
+<tr><td>Manufacturer ID</td><td><code>1879</code> (0x0757)</td></tr>
+<tr><td>DataInfo byte (offset 0)</td><td><code>0x06</code> (ID format devices)</td></tr>
+<tr><td>Tag ID source</td><td>BLE device local name (e.g. "CID015E58")</td></tr>
+<tr><td>Normalised format</td><td><code>C ID 015E58</code></td></tr>
+</table>
+
+<pre><code><span class="kw">object</span> ElaPacketParser {
+    <span class="kw">const val</span> MANUFACTURER_ID = <span class="num">1879</span>
+
+    <span class="kw">fun</span> <span class="fn">parse</span>(mfcData: ByteArray, scanRecord: ScanRecord?): ElaPacket? {
+        <span class="kw">if</span> (mfcData[<span class="num">0</span>] != <span class="num">0x06</span>.toByte()) <span class="kw">return null</span>   <span class="cm">// Check DataInfo</span>
+        <span class="kw">val</span> localName = scanRecord?.deviceName ?: <span class="kw">return null</span>
+        <span class="kw">val</span> normalised = normalizeCId(localName) ?: <span class="kw">return null</span>
+        <span class="kw">return</span> ElaPacket(tagId = normalised)
+    }
+}
+</code></pre>
+
+<h4>C ID Normalisation</h4>
+<p>The <code>normalizeCId()</code> function accepts several input formats and converts them all to <code>"C ID XXXXXX"</code>:</p>
+<table>
+<tr><th>Input</th><th>Output</th><th>Valid?</th></tr>
+<tr><td><code>015E58</code></td><td><code>C ID 015E58</code></td><td>Yes</td></tr>
+<tr><td><code>CID015E58</code></td><td><code>C ID 015E58</code></td><td>Yes</td></tr>
+<tr><td><code>cid015e58</code></td><td><code>C ID 015E58</code></td><td>Yes</td></tr>
+<tr><td><code>C ID 015E58</code></td><td><code>C ID 015E58</code></td><td>Yes</td></tr>
+<tr><td><code>XYZ</code></td><td><code>null</code></td><td>No — invalid</td></tr>
+</table>
+<p>Validation requires exactly 6 hex characters matching <code>[0-9A-F]{6}</code>.</p>
+
+<h3>5.3 EM Packet Parser</h3>
+<p>EM Microelectronic tags use the AltBeacon format. The tag's MAC address is extracted directly from the Bluetooth device link-layer address (since the payload might truncate the full MAC).</p>
+
+<table>
+<tr><th>Field</th><th>Value</th></tr>
+<tr><td>Manufacturer ID</td><td><code>90</code> (0x005A)</td></tr>
+<tr><td>Signature bytes</td><td><code>0xBE</code>, <code>0xAC</code></td></tr>
+<tr><td>Tag ID source</td><td>BLE device link-layer MAC address</td></tr>
+<tr><td>Normalised format</td><td>12-character uppercase hex string (e.g. <code>58C35608EEB0</code>)</td></tr>
+</table>
+
+<pre><code><span class="kw">object</span> EmPacketParser {
+    <span class="kw">const val</span> MANUFACTURER_ID = <span class="num">90</span>
+
+    <span class="kw">fun</span> <span class="fn">parse</span>(manufacturerData: ByteArray, device: BluetoothDevice?): EmPacket? {
+        <span class="kw">if</span> (!isAltBeaconFormat(manufacturerData)) <span class="kw">return null</span>
+        <span class="kw">val</span> protocolMac = device?.address ?: <span class="kw">return null</span>
+        <span class="kw">val</span> macHex = protocolMac.replace(<span class="st">":"</span>, <span class="st">""</span>).uppercase()
+        <span class="kw">return</span> EmPacket(tagId = macHex)
+    }
+}
+</code></pre>
+
+<h3>5.4 Adding a New Tag Type</h3>
+<ol>
+<li>Create <code>NewTagParser.kt</code> with a <code>parse()</code> method extracting the unique ID from manufacturer data</li>
+<li>Add a <code>ScanFilter</code> in <code>BleTagDetector.startScanning()</code> for the new manufacturer ID</li>
+<li>Add a branch in <code>scanCallback.onScanResult()</code> to call your parser when the manufacturer ID matches</li>
+<li>Add display/storage format helpers in both the app and the dashboard</li>
+<li>Add the tag type option to the dashboard's "Add Tool" form</li>
+</ol>
+
+<!-- ===== SECTION 6 ===== -->
+<h2 id="s6">6. Batch Processing &amp; Location Updates</h2>
+<p>Rather than uploading to Firebase every time a BLE packet arrives (which could be hundreds per second), the app accumulates detections and processes them in <strong>5-second batches</strong>.</p>
+
+<h3>6.1 Data Structures</h3>
+<div class="term">
+<strong>What is a ConcurrentHashMap?</strong> A thread-safe dictionary. BLE callbacks run on a Bluetooth thread while batch processing runs on a separate scheduled thread. A ConcurrentHashMap allows both threads to read and write safely without corrupting data or crashing.
+</div>
+
+<table>
+<tr><th>Variable</th><th>Type</th><th>Purpose</th></tr>
+<tr><td><code>pendingTags</code></td><td>ConcurrentHashSet&lt;String&gt;</td><td>Tag UUIDs detected since last batch</td></tr>
+<tr><td><code>tagTypes</code></td><td>ConcurrentHashMap&lt;String,&nbsp;String&gt;</td><td>Filter-based single source of truth for tag types ("hilti"|"ela"|"em")</td></tr>
+<tr><td><code>tagRssiMap</code></td><td>ConcurrentHashMap&lt;String,&nbsp;Int&gt;</td><td>Most recent RSSI per tag (overwritten with latest)</td></tr>
+<tr><td><code>tagDetectionTimes</code></td><td>ConcurrentHashMap&lt;String,&nbsp;Long&gt;</td><td>Most recent detection timestamp per tag (ms)</td></tr>
+<tr><td><code>mappedTags</code></td><td>Map&lt;String,&nbsp;String&gt;</td><td>Cache of tagUuid → toolId from Firebase</td></tr>
+<tr><td><code>sessionTags</code></td><td>ConcurrentHashSet&lt;String&gt;</td><td>Tags found during an active tag-mapping session</td></tr>
+</table>
+
+<h3>6.2 Batch Processing Cycle</h3>
+<div class="term">
+<strong>What is a ScheduledExecutorService?</strong> A Java utility that runs a piece of code at fixed time intervals on a background thread. Unlike a simple timer, it handles threading correctly and is designed for long-running, server-like repeating tasks.
+</div>
+
+<div class="diagram">
+Every 5 seconds (BATCH_INTERVAL_MS):
+┌───────────────────────────────────────────────────────────┐
+│ 1. Snapshot pendingTags → tagsToProcess                   │
+│ 2. Clear pendingTags (ready for next batch)               │
+│                                                           │
+│ 3. If tagsToProcess is empty → onNoMappedTagsDetected()   │
+│                                                           │
+│ 4. Get cached GPS location (thread-safe read)             │
+│                                                           │
+│ 5. For each tag in tagsToProcess:                         │
+│    ├─ Look up tag in mappedTags cache                     │
+│    │   ├─ FOUND → updateDatabaseWithLocation()            │
+│    │   │   └─ Update tool node + append sighting          │
+│    │   └─ NOT FOUND → query Firebase (orderByChild)       │
+│    │       ├─ Mapped → update cache + update Firebase     │
+│    │       └─ Unmapped → showUnmappedTagNotification()    │
+│    │                     (throttled: once per 30 seconds) │
+│    └─ Clean up tagRssiMap and tagDetectionTimes           │
+│                                                           │
+│ 6. If any mapped tags → onMappedTagDetected()             │
+│    else → onNoMappedTagsDetected()                        │
+└───────────────────────────────────────────────────────────┘
+</div>
+
+<h3>6.3 Adaptive Location Updates</h3>
+<p>GPS is battery-expensive. The app uses an <strong>adaptive strategy</strong>: it only requests GPS when it's actually detecting mapped tags.</p>
+
+<div class="diagram">
+                  ┌─────────────────┐
+     Mapped tag   │  GPS Updates    │   No mapped tags
+     detected ──▶ │  RUNNING        │ ──▶ Idle counter++
+                  │  (every 5 sec)  │
+                  └────────┬────────┘
+                           │
+              idle ≥ 2 cycles?
+                    │
+              YES   ▼
+                  ┌─────────────────┐
+                  │  GPS Updates    │   Mapped tag
+                  │  STOPPED        │ ◀── detected
+                  │  (save battery) │
+                  └─────────────────┘
+</div>
+
+<ul>
+<li><strong>Start:</strong> A mapped tag appears in a batch cycle</li>
+<li><strong>Stop:</strong> 2 consecutive cycles with zero mapped tags (≈ 10 seconds idle)</li>
+<li><strong>Interval:</strong> 5 seconds via <code>FusedLocationProviderClient.getCurrentLocation(HIGH_ACCURACY)</code></li>
+<li><strong>Caching:</strong> Latest location stored in <code>lastKnownLocation</code>, used for all tags in the next batch</li>
+</ul>
+
+<h3>6.4 Firebase Update Payload</h3>
+<p>When a mapped tag is detected with a valid GPS location, two Firebase writes occur:</p>
+
+<h4>A. Tool Update (overwrites previous)</h4>
+<pre><code>ble-localization-poc/tools/{toolId} ← {
+    lastLat:        <span class="num">6.927079</span>,
+    lastLng:        <span class="num">79.861244</span>,
+    lastSeenAt:     <span class="num">1716100234567</span>,     <span class="cm">// Unix ms</span>
+    lastRssi:       <span class="num">-55</span>,               <span class="cm">// dBm</span>
+    lastAnchorId:   <span class="st">"a1b2c3d4-..."</span>,    <span class="cm">// This phone's UUID</span>
+    lastAnchorName: <span class="st">"Anchor-Pixel6"</span>    <span class="cm">// This phone's name</span>
+}
+</code></pre>
+
+<h4>B. Sighting Log (append-only)</h4>
+<pre><code>ble-localization-poc/sightings/{auto-id} ← {
+    tagUuid:    <span class="st">"d32218666c12"</span>,
+    anchorLat:  <span class="num">6.927079</span>,
+    anchorLng:  <span class="num">79.861244</span>,
+    timestamp:  <span class="num">1716100234567</span>,
+    rssi:       <span class="num">-55</span>,
+    anchorId:   <span class="st">"a1b2c3d4-..."</span>,
+    anchorName: <span class="st">"Anchor-Pixel6"</span>
+}
+</code></pre>
+
+<div class="card">
+<strong>Why both?</strong> The <strong>tool update</strong> gives the dashboard the latest position. The <strong>sighting log</strong> provides a history that the dashboard uses for multi-anchor winner selection — when multiple phones detect the same tag, the dashboard picks the strongest signal.
+</div>
+
+<h3>6.5 Unmapped Tag Notification</h3>
+<p>When a tag is detected that doesn't match any tool, the app shows a notification: "Tag X is not mapped to any tool." These are throttled to <strong>one per tag per 30 seconds</strong> to prevent spam.</p>
+
+<!-- ===== SECTION 7 ===== -->
+<h2 id="s7">7. Firebase Data Structures</h2>
+<p>All data is stored in Firebase Realtime Database under <code>ble-localization-poc/</code>. There are two main nodes:</p>
+
+<div class="term">
+<strong>What is Firebase Realtime Database?</strong> A cloud-hosted NoSQL database by Google. Data is stored as a JSON tree (like nested folders and values). When any client writes data, every other connected client receives the update within milliseconds — no polling required. The app and dashboard both connect to the same database and see changes instantly.
+</div>
+
+<h3>7.1 Tools Node</h3>
+<pre><code>ble-localization-poc/
+  tools/
+    {auto-generated-id}/
+      name:           <span class="st">"Hammer Drill"</span>
+      tagUuid:        <span class="st">"d32218666c12"</span>       <span class="cm">// null if unmapped</span>
+      tagType:        <span class="st">"hilti"</span>              <span class="cm">// "hilti" | "ela" | "em"</span>
+      lastLat:        <span class="num">6.927079</span>
+      lastLng:        <span class="num">79.861244</span>
+      lastSeenAt:     <span class="num">1716100234567</span>        <span class="cm">// ms since epoch</span>
+      lastRssi:       <span class="num">-55</span>
+      lastAnchorId:   <span class="st">"uuid-of-anchor"</span>
+      lastAnchorName: <span class="st">"Anchor-Pixel6"</span>
+</code></pre>
+
+<table>
+<tr><th>Field</th><th>Type</th><th>Set By</th><th>Purpose</th></tr>
+<tr><td><code>name</code></td><td>String</td><td>User</td><td>Human-readable tool name</td></tr>
+<tr><td><code>tagUuid</code></td><td>String?</td><td>User (mapping)</td><td>Links tool to a physical BLE tag; <code>null</code> = no tag</td></tr>
+<tr><td><code>tagType</code></td><td>String?</td><td>Dashboard</td><td>Determines display/conversion format</td></tr>
+<tr><td><code>lastLat</code></td><td>Double</td><td>App (auto)</td><td>GPS latitude; <code>0</code> = never seen</td></tr>
+<tr><td><code>lastLng</code></td><td>Double</td><td>App (auto)</td><td>GPS longitude; <code>0</code> = never seen</td></tr>
+<tr><td><code>lastSeenAt</code></td><td>Long?</td><td>App (auto)</td><td>Timestamp for "last seen X ago" displays</td></tr>
+<tr><td><code>lastRssi</code></td><td>Int</td><td>App (auto)</td><td>Signal strength; higher = closer (−40 very close, −90 far)</td></tr>
+<tr><td><code>lastAnchorId</code></td><td>String</td><td>App (auto)</td><td>UUID of the phone that reported this</td></tr>
+<tr><td><code>lastAnchorName</code></td><td>String</td><td>App (auto)</td><td>Friendly name of that phone</td></tr>
+</table>
+
+<h3>7.2 Sightings Node</h3>
+<pre><code>ble-localization-poc/
+  sightings/
+    {auto-generated-id}/
+      tagUuid:    <span class="st">"d32218666c12"</span>
+      anchorLat:  <span class="num">6.927079</span>
+      anchorLng:  <span class="num">79.861244</span>
+      timestamp:  <span class="num">1716100234567</span>
+      rssi:       <span class="num">-55</span>
+      anchorId:   <span class="st">"uuid-of-anchor"</span>
+      anchorName: <span class="st">"Anchor-Pixel6"</span>
+</code></pre>
+
+<div class="card">
+<strong>Why both Tools and Sightings?</strong>
+<ul>
+<li><strong>Tools</strong> stores the <em>current</em> position (overwritten on each detection). This is what the dashboard shows on the map.</li>
+<li><strong>Sightings</strong> is an <em>append-only log</em>. When multiple phones see the same tag, the dashboard compares sightings within a time window and picks the one with the strongest signal (winner selection algorithm).</li>
+</ul>
+</div>
+
+<h3>7.3 Tag Cache (In-Memory)</h3>
+<p>To avoid querying Firebase on every BLE detection, <code>BleTagDetector</code> maintains an in-memory cache called <code>mappedTags</code> (<code>Map&lt;String, String&gt;</code> mapping tagUuid → toolId). This cache is kept in sync via:</p>
+<ul>
+<li><strong>Real-time listener:</strong> A Firebase <code>ValueEventListener</code> on the tools node updates the cache automatically</li>
+<li><strong>Manual refresh:</strong> <code>refreshTagCache()</code> is called at service startup and after any tag mapping operation</li>
+</ul>
+
+<!-- ===== SECTION 8 ===== -->
+<h2 id="s8">8. Tag UUID Encoding &amp; Decoding</h2>
+<p>Hilti tags have a complex encoding because their barcodes show a <em>decimal</em> number, but the BLE broadcast contains <em>hexadecimal</em> bytes in <em>little-endian</em> order. Both the app and dashboard must convert between these formats identically.</p>
+
+<div class="term">
+<strong>What is Little-Endian?</strong> A way of ordering bytes where the <em>least significant</em> byte comes first. The number <code>0x18666C12</code> stored in little-endian becomes <code>12 6C 66 18</code>. This is the opposite of how humans normally write numbers (most significant first). Many hardware protocols use little-endian because processors read the smallest part first.
+</div>
+
+<h3>8.1 Hilti Tag Encoding</h3>
+<div class="diagram">
+         Barcode on tag label
+                │
+                ▼
+          309257752            ← DECIMAL number
+                │
+      decimal → hex
+                │
+                ▼
+          126c6618             ← HEX (8 chars, zero-padded)
+                │
+       reverse bytes (little-endian swap)
+                │
+                ▼
+          18666c12             ← REVERSED HEX
+                │
+       add "d322" prefix
+                │
+                ▼
+       d32218666c12            ← STORAGE FORMAT (in Firebase)
+</div>
+
+<table>
+<tr><th>Step</th><th>Operation</th><th>Value</th></tr>
+<tr><td>1</td><td>Barcode decimal</td><td><code>309257752</code></td></tr>
+<tr><td>2</td><td>Decimal → Hex</td><td><code>126c6618</code></td></tr>
+<tr><td>3</td><td>Pad to 8 chars</td><td><code>126c6618</code> (already 8)</td></tr>
+<tr><td>4</td><td>Reverse byte pairs</td><td><code>18666c12</code></td></tr>
+<tr><td>5</td><td>Add d322 prefix</td><td><code>d32218666c12</code></td></tr>
+</table>
+
+<h4>Decoding (Storage → Display):</h4>
+<table>
+<tr><th>Step</th><th>Operation</th><th>Value</th></tr>
+<tr><td>1</td><td>Storage format</td><td><code>d32218666c12</code></td></tr>
+<tr><td>2</td><td>Remove d322 prefix</td><td><code>18666c12</code></td></tr>
+<tr><td>3</td><td>Reverse byte pairs</td><td><code>126c6618</code></td></tr>
+<tr><td>4</td><td>Hex → Decimal</td><td><code>309257752</code></td></tr>
+</table>
+
+<h3>8.2 ELA Tag Encoding</h3>
+<p>ELA tags are simpler — no byte reversal needed:</p>
+<table>
+<tr><th>Source</th><th>Format</th><th>Storage</th></tr>
+<tr><td>Label: <code>015E58</code></td><td>6 hex chars</td><td><code>C ID 015E58</code></td></tr>
+<tr><td>Label: <code>CID015E58</code></td><td>Prefixed</td><td><code>C ID 015E58</code></td></tr>
+<tr><td>BLE name: <code>CID015E58</code></td><td>Device name</td><td><code>C ID 015E58</code></td></tr>
+</table>
+
+<h3>8.3 Conversion Code (Android)</h3>
+<pre><code><span class="cm">// Decimal barcode → Storage UUID</span>
+<span class="kw">fun</span> <span class="fn">encodeBarcodeToTagUuid</span>(decimalBarcode: String): String {
+    <span class="kw">val</span> hex = decimalBarcode.toLong().toString(<span class="num">16</span>).padStart(<span class="num">8</span>, <span class="st">'0'</span>)
+    <span class="kw">val</span> reversed = hex.chunked(<span class="num">2</span>).reversed().joinToString(<span class="st">""</span>)
+    <span class="kw">return</span> <span class="st">"d322$reversed"</span>
+}
+
+<span class="cm">// Storage UUID → Display decimal</span>
+<span class="kw">fun</span> <span class="fn">hexToDecimal</span>(hexUuid: String): String {
+    <span class="kw">val</span> withoutPrefix = hexUuid.removePrefix(<span class="st">"d322"</span>)
+    <span class="kw">val</span> reversed = withoutPrefix.chunked(<span class="num">2</span>).reversed().joinToString(<span class="st">""</span>)
+    <span class="kw">return</span> reversed.toLong(<span class="num">16</span>).toString()
+}
+</code></pre>
+
+<!-- ===== SECTION 9 ===== -->
+<h2 id="s9">9. UI Screens &amp; User Flows</h2>
+
+<div class="term">
+<strong>What is Jetpack Compose?</strong> A modern Android UI toolkit where you build screens by writing Kotlin functions (called <em>Composables</em>) that describe what the UI looks like. When data changes, Compose automatically re-draws only the affected parts. This replaces the older XML-based layout system.
+</div>
+
+<h3>9.1 Navigation Structure</h3>
+<div class="diagram">
+┌──────────────────────────────────────────┐
+│           Bottom Navigation Bar          │
+│   ┌─────────┐         ┌─────────┐       │
+│   │   Map   │         │  Tools  │       │
+│   └────┬────┘         └────┬────┘       │
+│        │                   │             │
+│        ▼                   ▼             │
+│   MapScreen           ToolsListScreen    │
+│   (all tools          │                  │
+│    on a map)          ├──▶ TagMappingScreen
+│                       │    │             │
+│                       │    └──▶ BarcodeScanScreen
+│                       │                  │
+│                       └──▶ ToolLocationScreen
+│                            (single tool  │
+│                             on map)      │
+└──────────────────────────────────────────┘
+</div>
+
+<h3>9.2 MapScreen</h3>
+<p>Shows all tools with known locations on an OpenStreetMap map using the OSMDroid library.</p>
+<ul>
+<li><strong>Markers:</strong> One per tool with a valid latitude/longitude</li>
+<li><strong>Popup:</strong> Tool name, tag UUID, coordinates, last seen time</li>
+<li><strong>Auto-zoom:</strong> Fits all markers in view when multiple tools exist</li>
+<li><strong>Refresh button (FAB):</strong> Calls <code>clearAllLastSeen()</code> to reset all tool locations</li>
+<li><strong>Real-time updates:</strong> Receives a Flow of tools from <code>ToolRepository</code>; map updates automatically</li>
+</ul>
+
+<div class="term">
+<strong>What is a FAB?</strong> A Floating Action Button — a circular button that "floats" above the content, typically in the bottom-right corner. It represents the primary action on a screen.
+</div>
+
+<h3>9.3 ToolsListScreen</h3>
+<p>A scrollable list of all registered tools with their status.</p>
+<ul>
+<li><strong>Service status card:</strong> Green indicator showing "BLE Tracking Service – Running"</li>
+<li><strong>Tool cards:</strong> Each shows the tool name, formatted tag UUID (decimal for Hilti, C ID for ELA) or "No tag mapped", and last seen info</li>
+<li><strong>Actions per tool:</strong>
+  <ul>
+    <li><strong>Map Tag</strong> – navigate to TagMappingScreen (only if no tag mapped)</li>
+    <li><strong>Unmap</strong> – remove the tag-to-tool link</li>
+    <li><strong>Locate</strong> – navigate to ToolLocationScreen (only if location available)</li>
+    <li><strong>Delete</strong> – remove tool with confirmation dialog</li>
+  </ul>
+</li>
+<li><strong>Add button (FAB):</strong> Dialog to enter a tool name; creates a new tool with no tag</li>
+</ul>
+
+<h3>9.4 TagMappingScreen</h3>
+<p>Links a BLE tag to a tool. Two methods are available:</p>
+
+<h4>Method A: BLE Scan</h4>
+<ol>
+<li>User taps "BLE Scan"</li>
+<li>A 10-second scan session begins</li>
+<li>The screen polls <code>BleTagDetector.getSessionTags()</code> every second</li>
+<li>Discovered tags appear in a list showing type (Hilti/ELA), UUID, RSSI, and whether already mapped</li>
+<li>User taps an available tag → <code>selectTag()</code> updates Firebase</li>
+</ol>
+
+<h4>Method B: Camera Scan</h4>
+<ol>
+<li>User taps "Camera Scan" → navigates to BarcodeScanScreen</li>
+<li>Barcode is scanned and the value converted to a tag UUID</li>
+<li>The tag is assigned to the tool</li>
+</ol>
+
+<h3>9.5 BarcodeScanScreen</h3>
+<div class="term">
+<strong>What is a Consensus Algorithm (in this context)?</strong> Instead of trusting a single barcode read (which might be wrong due to blur or glare), the app requires <strong>5 consecutive identical reads</strong> before accepting the result. If they disagree, it resets and tries again. This dramatically reduces misreads.
+</div>
+
+<p>Uses CameraX for the live camera feed and Google ML Kit for barcode detection:</p>
+<ul>
+<li><strong>Viewfinder overlay:</strong> Semi-transparent background with a clear window and crosshair</li>
+<li><strong>Centre targeting:</strong> Only considers the barcode closest to the screen centre</li>
+<li><strong>ISO-8859-1 fallback:</strong> Re-encodes barcodes with wrong character set (common with Data Matrix codes)</li>
+<li><strong>Digit extraction:</strong> Strips non-numeric characters from the barcode value</li>
+<li><strong>Consensus:</strong> 5 identical reads → accept; disagreement → reset</li>
+<li><strong>Feedback:</strong> Audio beep + haptic vibration on success; error tone on failure</li>
+<li><strong>Duplicate check:</strong> Blocks assignment if tag is already mapped to another tool</li>
+</ul>
+
+<h3>9.6 ToolLocationScreen</h3>
+<p>Shows a single tool's last known location on a dedicated map, zoomed to level 18 (street level). Includes a back button to return to the tools list.</p>
+
+<!-- ===== SECTION 10 ===== -->
+<h2 id="s10">10. Dependency Injection (Hilt)</h2>
+
+<div class="term">
+<strong>What is Dependency Injection (DI)?</strong> Instead of each class creating its own dependencies (e.g. a database connection), a central system <em>provides</em> them. Benefits: (1) objects can be shared (one database connection for the whole app), (2) code is easier to test because you can swap in fakes. <strong>Hilt</strong> is Google's recommended DI framework for Android — you annotate classes with <code>@Inject</code> and Hilt automatically creates and delivers the right objects.
+</div>
+
+<div class="term">
+<strong>What is a Singleton?</strong> An object created <em>once</em> and reused everywhere. For example, there is only one <code>BleTagDetector</code> in the entire app — the foreground service and the UI screens all share the same instance. This is critical because the scanner maintains state (tag cache, pending tags, session tags) that must be consistent.
+</div>
+
+<h3>10.1 Module: DatabaseModule</h3>
+<p>Located at <code>di/DatabaseModule.kt</code>, this defines all shared objects:</p>
+<table>
+<tr><th>Provider</th><th>Returns</th><th>Scope</th><th>Purpose</th></tr>
+<tr><td><code>provideFirebaseDatabase()</code></td><td><code>FirebaseDatabase</code></td><td>Singleton</td><td>Single connection to Firebase</td></tr>
+<tr><td><code>@ToolsReference</code></td><td><code>DatabaseReference</code></td><td>Singleton</td><td>Reference to <code>ble-localization-poc/tools</code></td></tr>
+<tr><td><code>@SightingsReference</code></td><td><code>DatabaseReference</code></td><td>Singleton</td><td>Reference to <code>ble-localization-poc/sightings</code></td></tr>
+<tr><td><code>provideFusedLocationClient()</code></td><td><code>FusedLocationProviderClient</code></td><td>Singleton</td><td>GPS location provider</td></tr>
+<tr><td><code>provideBleTagDetector()</code></td><td><code>BleTagDetector</code></td><td>Singleton</td><td>Core scanner + batch processor</td></tr>
+</table>
+
+<h3>10.2 Injection Points</h3>
+<pre><code><span class="ann">@HiltAndroidApp</span>        <span class="cm">// Application class – triggers DI setup</span>
+<span class="kw">class</span> HiltiBleApplication
+
+<span class="ann">@AndroidEntryPoint</span>     <span class="cm">// Activity – can receive injected objects</span>
+<span class="kw">class</span> MainActivity
+
+<span class="ann">@AndroidEntryPoint</span>     <span class="cm">// Service – receives BleTagDetector</span>
+<span class="kw">class</span> BleTrackingService
+
+<span class="ann">@HiltViewModel</span>         <span class="cm">// ViewModel – receives Repository + BleTagDetector</span>
+<span class="kw">class</span> TagMappingViewModel
+
+<span class="ann">@HiltWorker</span>            <span class="cm">// WorkManager worker – receives location client</span>
+<span class="kw">class</span> LocationUpdateWorker
+</code></pre>
+
+<!-- ===== SECTION 11 ===== -->
+<h2 id="s11">11. Data Layer &amp; ViewModels</h2>
+
+<h3>11.1 Tool Entity</h3>
+<div class="term">
+<strong>What is a Data Class?</strong> In Kotlin, a <code>data class</code> is a class whose main purpose is to hold data. Kotlin automatically generates <code>equals()</code>, <code>hashCode()</code>, <code>toString()</code>, and <code>copy()</code> methods. <code>copy()</code> is especially useful — it creates a new object with some fields changed while keeping the rest.
+</div>
+
+<pre><code><span class="kw">data class</span> Tool(
+    <span class="kw">val</span> id: String = <span class="st">""</span>,
+    <span class="kw">val</span> name: String = <span class="st">""</span>,
+    <span class="kw">val</span> tagUuid: String? = <span class="kw">null</span>,
+    <span class="kw">val</span> lastLat: Double = <span class="num">0.0</span>,
+    <span class="kw">val</span> lastLng: Double = <span class="num">0.0</span>,
+    <span class="kw">val</span> lastSeenAt: Long? = <span class="kw">null</span>
+)
+</code></pre>
+
+<h3>11.2 ToolRepository</h3>
+<div class="term">
+<strong>What is a Repository?</strong> A design pattern that acts as a single source of truth for data. All database operations go through the repository, so the rest of the app doesn't need to know whether data comes from Firebase, a local cache, or anywhere else.
+</div>
+
+<table>
+<tr><th>Method</th><th>Operation</th><th>Description</th></tr>
+<tr><td><code>getAllToolsFlow()</code></td><td>Read (real-time)</td><td>Returns a Flow that emits whenever any tool changes</td></tr>
+<tr><td><code>getToolById(id)</code></td><td>Read (one-shot)</td><td>Fetch a single tool by Firebase key</td></tr>
+<tr><td><code>getToolByTagUuid(uuid)</code></td><td>Read (query)</td><td>Find the tool mapped to a specific tag</td></tr>
+<tr><td><code>insertTool(tool)</code></td><td>Create</td><td>Push new tool; returns generated ID</td></tr>
+<tr><td><code>updateTool(tool)</code></td><td>Update</td><td>Overwrite fields</td></tr>
+<tr><td><code>deleteTool(id)</code></td><td>Delete</td><td>Remove tool from Firebase</td></tr>
+<tr><td><code>unmapTag(id)</code></td><td>Update</td><td>Set tagUuid to null</td></tr>
+<tr><td><code>clearAllLastSeen()</code></td><td>Batch Update</td><td>Reset location data for all tools</td></tr>
+</table>
+
+<div class="term">
+<strong>What is a Flow?</strong> A Kotlin Flow is a stream of values that arrive over time. Think of it like a pipe: Firebase pushes new data in one end, and the UI automatically updates at the other end. Unlike a one-time query, a Flow stays connected and delivers updates in real time.
+</div>
+
+<h3>11.3 ViewModels</h3>
+<div class="term">
+<strong>What is a ViewModel?</strong> A class that stores and manages UI-related data. It survives configuration changes (like screen rotation) so data isn't lost. ViewModels contain business logic ("start a scan", "map a tag") while Composable screens only handle display.
+</div>
+
+<h4>TagMappingViewModel</h4>
+<ul>
+<li><strong>Scan states:</strong> <code>IDLE → SCANNING → DONE</code></li>
+<li><strong>Session tag collection:</strong> Polls <code>BleTagDetector.getSessionTags()</code> every second during a 10-second scan</li>
+<li><strong>Tag enrichment:</strong> Checks if each discovered tag is already mapped and attaches the tool name</li>
+<li><strong>Barcode processing:</strong> Determines if barcode is ELA C ID or Hilti decimal, converts to storage format</li>
+<li><strong>Duplicate prevention:</strong> Queries Firebase before assigning; blocks if tag already mapped</li>
+<li><strong>Cache refresh:</strong> Triggers <code>BleTagDetector.refreshTagCache()</code> after mapping</li>
+</ul>
+
+<h4>ToolsListViewModel</h4>
+<ul>
+<li><strong><code>tools</code></strong> – <code>StateFlow&lt;List&lt;Tool&gt;&gt;</code> from repository, auto-updates</li>
+<li><strong><code>addToolWithName(name)</code></strong> – creates tool with no tag</li>
+<li><strong><code>deleteTool(id)</code></strong> – removes a tool</li>
+<li><strong><code>unmapTag(id)</code></strong> – unlinks tag and refreshes BLE cache</li>
+<li><strong><code>clearAllLastSeen()</code></strong> – resets all tool locations</li>
+</ul>
+
+<div class="term">
+<strong>What is StateFlow?</strong> A special type of Flow that always holds a current value. UI components observe it and automatically re-render when the value changes. It's like a "live variable" that the UI watches.
+</div>
+
+<!-- ===== SECTION 12 ===== -->
+<h2 id="s12">12. Background Execution Strategies</h2>
+<p>Keeping a BLE scanner running reliably in the background is one of the hardest problems on Android. The system actively kills background processes to save battery. This section summarises every strategy the app uses.</p>
+
+<table>
+<tr><th>Strategy</th><th>What It Does</th><th>Why Needed</th></tr>
+<tr><td>Foreground Service</td><td>Shows persistent notification; system won't kill the process</td><td>Required for continuous BLE scanning</td></tr>
+<tr><td>WakeLock</td><td>Keeps CPU running when screen is off</td><td>Without it, scan callbacks stop firing</td></tr>
+<tr><td>WakeLock Refresh (8 min)</td><td>Releases and re-acquires periodically</td><td>Android may release after timeout</td></tr>
+<tr><td>BLE Scan Restart (60 sec)</td><td>Stops and restarts the BLE scan</td><td>Android may silently stop long scans</td></tr>
+<tr><td>Manufacturer Filters</td><td>Hardware-level packet matching</td><td>Android 8.1+ blocks unfiltered scans when screen off</td></tr>
+<tr><td>START_STICKY</td><td>System restarts service if killed for memory</td><td>Recovery from OOM kills</td></tr>
+<tr><td>onTaskRemoved()</td><td>Restarts service when user swipes app away</td><td>User action would otherwise stop scanning</td></tr>
+<tr><td>BootReceiver</td><td>Starts service on device reboot</td><td>Service doesn't survive reboots by default</td></tr>
+<tr><td>Battery Opt. Exemption</td><td>Prevents Doze mode from pausing the app</td><td>Doze suspends all background work after minutes</td></tr>
+</table>
+
+<div class="card">
+<strong>Summary:</strong> These nine layers of persistence work together to ensure the BLE scanner runs 24/7. Each addresses a different way Android might stop background work. If any single layer fails, the others compensate.
+</div>
+
+<div class="card">
+<strong>Related Documentation:</strong>
+<ul>
+<li><a href="dashboard-documentation.html">Dashboard Documentation</a> — web UI, filtering, winner selection, tag input system</li>
+<li><a href="system-integration-documentation.html">System Integration &amp; Advanced Topics</a> — end-to-end flow, multi-anchor coordination, adding new tag types, glossary</li>
+</ul>
+</div>
+
+</body>
+</html>

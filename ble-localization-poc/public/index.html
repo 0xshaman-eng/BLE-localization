@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BLE Localization Dashboard</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root {
+            --primary: #1a73e8;
+            --primary-light: #e8f0fe;
+            --bg: #f8f9fa;
+            --card-bg: #ffffff;
+            --text: #202124;
+            --text-secondary: #5f6368;
+            --border: #dadce0;
+            --success: #34a853;
+            --error: #ea4335;
+            --warning: #f9ab00;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+        header { background: var(--primary); color: white; padding: 14px 24px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center; }
+        header h1 { font-size: 18px; font-weight: 500; }
+        .status-bar { display: flex; align-items: center; gap: 6px; font-size: 12px; opacity: 0.9; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--error); }
+        .status-dot.connected { background: var(--success); }
+
+        .layout { display: grid; grid-template-columns: 1fr 420px; height: calc(100vh - 52px); }
+        #map { width: 100%; height: 100%; }
+
+        .sidebar { overflow-y: auto; border-left: 1px solid var(--border); background: var(--card-bg); display: flex; flex-direction: column; }
+        .tabs { display: flex; border-bottom: 2px solid var(--border); background: var(--card-bg); }
+        .tab { flex: 1; padding: 12px 16px; text-align: center; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--text-secondary); border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.2s; }
+        .tab:hover { background: var(--bg); }
+        .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+        .tab-content { display: none; flex: 1; overflow-y: auto; }
+        .tab-content.active { display: block; }
+        .sidebar-section { padding: 16px; border-bottom: 1px solid var(--border); }
+        .sidebar-section h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); }
+
+        .tool-card { background: var(--bg); border-radius: 8px; padding: 12px; margin-bottom: 8px; border: 1px solid var(--border); }
+        .tool-card:hover { border-color: var(--primary); }
+        .tool-header { display: flex; justify-content: space-between; align-items: center; }
+        .tool-name { font-weight: 600; font-size: 14px; }
+        .tool-tag { font-family: 'Consolas', monospace; font-size: 11px; color: var(--primary); margin-top: 2px; word-break: break-all; }
+        .tool-no-tag { font-size: 12px; color: var(--text-secondary); font-style: italic; }
+        .tool-location { font-size: 11px; color: var(--success); margin-top: 4px; display: flex; align-items: center; gap: 4px; }
+        .tool-actions { display: flex; gap: 6px; margin-top: 8px; }
+
+        .btn { padding: 4px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 11px; cursor: pointer; background: white; color: var(--text); transition: all 0.15s; }
+        .btn:hover { background: var(--bg); }
+        .btn-primary { background: var(--primary); color: white; border-color: var(--primary); }
+        .btn-primary:hover { opacity: 0.9; }
+        .btn-danger { color: var(--error); border-color: var(--error); }
+        .btn-danger:hover { background: #fce8e6; }
+        .btn-locate { color: var(--primary); border-color: var(--primary); }
+        .btn-locate:hover { background: var(--primary-light); }
+        .btn-delete { padding: 2px 6px; border: none; background: none; color: var(--text-secondary); cursor: pointer; font-size: 16px; }
+        .btn-delete:hover { color: var(--error); }
+        .btn-menu { padding: 4px 8px; border: none; background: none; color: var(--text-secondary); cursor: pointer; font-size: 18px; font-weight: bold; }
+        .btn-menu:hover { background: var(--bg); border-radius: 4px; }
+        .dropdown-menu { position: absolute; right: 12px; top: 32px; background: white; border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); z-index: 1000; min-width: 120px; display: none; }
+        .dropdown-menu.show { display: block; }
+        .dropdown-item { padding: 8px 12px; cursor: pointer; font-size: 12px; color: var(--text); border-bottom: 1px solid var(--border); }
+        .dropdown-item:last-child { border-bottom: none; }
+        .dropdown-item:hover { background: var(--bg); }
+        .dropdown-item.danger { color: var(--error); }
+        .tool-card { position: relative; }
+
+        .form-row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+        .form-group { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+        .form-group label { font-size: 11px; font-weight: 500; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
+        .form-group select, .form-group input { padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 13px; outline: none; width: 100%; }
+        .form-group select:focus, .form-group input:focus { border-color: var(--primary); }
+        .tag-type-select { width: 100%; }
+        .tag-entry-help { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+        .tag-entry-help strong { color: var(--text); }
+        .tag-input-shell { display: flex; gap: 6px; flex-wrap: nowrap; align-items: center; margin-top: 2px; overflow-x: auto; padding-bottom: 2px; }
+        .tag-input-shell.disabled { opacity: 0.55; pointer-events: none; }
+        .tag-segment { width: 34px; height: 42px; flex: 0 0 34px; border: 1px solid var(--border); border-radius: 8px; background: white; text-align: center; font-size: 16px; font-weight: 600; color: var(--text); outline: none; transition: border-color 0.15s, box-shadow 0.15s; }
+        .tag-segment:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.12); }
+        .tag-segment.prefix { background: var(--bg); color: var(--text-secondary); cursor: not-allowed; flex: 0 0 34px; }
+        .filter-section { padding: 12px 16px; background: var(--bg); border-bottom: 1px solid var(--border); }
+        .filter-group { margin-bottom: 16px; padding: 12px; background: white; border: 1px solid var(--border); border-radius: 6px; }
+        .filter-group:last-child { margin-bottom: 0; }
+        .filter-group-title { font-size: 12px; font-weight: 600; color: var(--primary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; display: flex; justify-content: space-between; align-items: center; }
+        .filter-group-content { display: flex; flex-direction: column; gap: 8px; }
+        .filter-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .filter-input { flex: 1; min-width: 150px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; }
+        .filter-input:focus { border-color: var(--primary); outline: none; }
+        .filter-label { font-size: 11px; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px; }
+        .checkbox-label { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; }
+        .checkbox-label input[type="checkbox"] { cursor: pointer; }
+        .btn-reset { padding: 4px 8px; font-size: 10px; border: 1px solid var(--border); border-radius: 3px; background: white; color: var(--text-secondary); cursor: pointer; transition: all 0.15s; }
+        .btn-reset:hover { background: var(--bg); color: var(--primary); border-color: var(--primary); }
+
+        #feedback, #addFeedback { margin-top: 8px; font-size: 12px; min-height: 16px; }
+        .feedback-success { color: var(--success); }
+        .feedback-error { color: var(--error); }
+        .empty-state { text-align: center; padding: 24px; color: var(--text-secondary); font-size: 13px; }
+
+        @media (max-width: 900px) {
+            .layout { grid-template-columns: 1fr; grid-template-rows: 300px 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>BLE Localization Dashboard</h1>
+        <div class="status-bar">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusText">Connecting...</span>
+        </div>
+    </header>
+
+    <div class="layout">
+        <div id="map"></div>
+        <div class="sidebar">
+            <div class="tabs">
+                <div class="tab active" data-tab="map">Map</div>
+                <div class="tab" data-tab="add-tool">Add Tool</div>
+            </div>
+
+            <div id="mapTab" class="tab-content active">
+                <div class="filter-section">
+                    <!-- Text Search Filters -->
+                    <div class="filter-group">
+                        <div class="filter-group-title">
+                            <span>Text Search</span>
+                            <button id="resetTextBtn" class="btn-reset">Reset</button>
+                        </div>
+                        <div class="filter-group-content">
+                            <div class="filter-row">
+                                <div style="flex: 1;">
+                                    <div class="filter-label">Tool Name</div>
+                                    <input type="text" id="searchNameInput" class="filter-input" placeholder="Search by tool name..." />
+                                </div>
+                            </div>
+                            <div class="filter-row">
+                                <div style="flex: 1;">
+                                    <div class="filter-label">Tag ID</div>
+                                    <input type="text" id="searchUuidInput" class="filter-input" placeholder="Search by tag ID or C ID..." />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Date/Time Filters -->
+                    <div class="filter-group">
+                        <div class="filter-group-title">
+                            <span>Date Range</span>
+                            <button id="resetDateBtn" class="btn-reset">Reset</button>
+                        </div>
+                        <div class="filter-group-content">
+                            <div class="filter-row">
+                                <div style="flex: 1;">
+                                    <div class="filter-label">From:</div>
+                                    <input type="datetime-local" id="lastSeenStart" class="filter-input" />
+                                </div>
+                                <div style="flex: 1;">
+                                    <div class="filter-label">To:</div>
+                                    <input type="datetime-local" id="lastSeenEnd" class="filter-input" />
+                                </div>
+                            </div>
+                            <div class="filter-row">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="includeMissingToggle" />
+                                    <span>Include tools without last seen data</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Geographic Filters -->
+                    <div class="filter-group">
+                        <div class="filter-group-title">
+                            <span>Geographic</span>
+                            <button id="resetGeoBtn" class="btn-reset">Reset</button>
+                        </div>
+                        <div class="filter-group-content">
+                            <div class="filter-row">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="mapViewToggle" />
+                                    <span>Filter by current map bounds</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Global Actions -->
+                    <div class="filter-row" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
+                        <button id="showAllBtn" class="btn btn-primary" style="flex: 1;">Show All Tools</button>
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h2>Tools <span id="toolCount" style="font-weight:400;color:var(--text-secondary)"></span></h2>
+                    <div id="toolsList">
+                        <div class="empty-state">Loading tools...</div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="addToolTab" class="tab-content">
+                <div class="sidebar-section">
+                    <h2>Add Tool + Map Tag</h2>
+                    <form id="addToolForm">
+                        <div class="form-group">
+                            <label>Tool Name</label>
+                            <input type="text" id="newToolName" placeholder="e.g. Hammer, Drill..." required />
+                        </div>
+                        <div class="form-group" style="margin-top: 12px;">
+                            <label>Tag Type</label>
+                            <select id="tagTypeInput" class="tag-type-select" required>
+                                <option value="" selected>Select tag type...</option>
+                                <option value="hilti">Hilti</option>
+                                <option value="ela">ELA</option>
+                                <option value="em">EM</option>
+                                <option value="milwaukee">Milwaukee</option>
+                            </select>
+                            <div class="tag-entry-help">Choose the type first. The tag ID will switch to the matching format.</div>
+                        </div>
+                        <div class="form-group" style="margin-top: 12px;">
+                            <label>Tag ID</label>
+                            <div id="tagInputShell" class="tag-input-shell disabled">
+                                <div id="tagInputPrompt" class="tag-entry-help" style="margin: 0;">Select a tag type to enter the tag ID.</div>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary" style="margin-top: 12px; width: 100%;">Add Tool with Tag</button>
+                    </form>
+                    <div id="addFeedback" style="margin-top: 12px;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="env.js"></script>
+    <script type="module" src="app.js"></script>
+</body>
+</html>

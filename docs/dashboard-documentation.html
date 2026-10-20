@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BLE Tool Tracking – Dashboard Documentation</title>
+<style>
+:root{--bg:#f8f9fa;--card:#fff;--primary:#1a73e8;--primary-light:#e8f0fe;--text:#202124;--text2:#5f6368;--border:#dadce0;--code-bg:#f5f5f5;--success:#34a853;--warn:#f9ab00;--err:#ea4335;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.7;max-width:1100px;margin:0 auto;padding:24px;}
+h1{font-size:28px;margin:32px 0 8px;border-bottom:3px solid var(--primary);padding-bottom:8px;}
+h2{font-size:22px;margin:28px 0 8px;color:var(--primary);}
+h3{font-size:17px;margin:20px 0 6px;}
+h4{font-size:15px;margin:16px 0 4px;color:var(--text2);}
+p,li{font-size:15px;margin-bottom:8px;}
+ul,ol{padding-left:24px;margin-bottom:12px;}
+code{font-family:'Consolas','Fira Code',monospace;font-size:13px;background:var(--code-bg);padding:2px 6px;border-radius:3px;}
+pre{background:#1e1e1e;color:#d4d4d4;padding:16px;border-radius:8px;overflow-x:auto;margin:12px 0;font-size:13px;line-height:1.5;}
+pre code{background:none;padding:0;color:inherit;}
+.kw{color:#569cd6;}.st{color:#ce9178;}.cm{color:#6a9955;}.fn{color:#dcdcaa;}.num{color:#b5cea8;}.ann{color:#d7ba7d;}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px 20px;margin:12px 0;}
+.term{background:var(--primary-light);border-left:4px solid var(--primary);padding:12px 16px;margin:12px 0;border-radius:0 6px 6px 0;}
+.term strong{color:var(--primary);}
+.warn{background:#fef7e0;border-left:4px solid var(--warn);padding:12px 16px;margin:12px 0;border-radius:0 6px 6px 0;}
+.diagram{background:#fff;border:2px solid var(--border);border-radius:8px;padding:20px;margin:16px 0;font-family:'Consolas',monospace;font-size:13px;white-space:pre;overflow-x:auto;line-height:1.6;}
+table{width:100%;border-collapse:collapse;margin:12px 0;}
+th,td{border:1px solid var(--border);padding:8px 12px;text-align:left;font-size:14px;}
+th{background:var(--primary-light);font-weight:600;}
+.toc{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:20px;margin:20px 0;}
+.toc a{color:var(--primary);text-decoration:none;display:block;padding:3px 0;}
+.toc a:hover{text-decoration:underline;}
+.toc-h3{margin-left:20px;font-size:14px;}
+</style>
+</head>
+<body>
+
+<h1>BLE Tool Tracking System – Web Dashboard</h1>
+<p>Complete documentation for the web-based dashboard that displays tool locations, manages tool registrations, and handles tag mapping. The dashboard communicates with the same Firebase database used by the Android application.</p>
+
+<div class="toc">
+<strong>Table of Contents</strong>
+<a href="#d1">1. Dashboard Overview</a>
+<a href="#d2">2. Technology Stack &amp; Hosting</a>
+<a href="#d3">3. Firebase Configuration &amp; Real-time Listeners</a>
+<a href="#d4">4. Data Structures &amp; State</a>
+<a href="#d5">5. Winner Selection Algorithm</a>
+<a href="#d6">6. UI Layout &amp; Components</a>
+<a href="#d7">7. Filtering System</a>
+<a href="#d8">8. Map Visualisation</a>
+<a href="#d9">9. Tool Management</a>
+<a href="#d10">10. Tag Input &amp; Format Conversion</a>
+<a href="#d11">11. Event Handling &amp; Interactions</a>
+</div>
+
+<!-- ===== SECTION 1 ===== -->
+<h2 id="d1">1. Dashboard Overview</h2>
+<p>The dashboard is a single-page web application that provides a real-time view of all tracked tools. It connects to the same Firebase Realtime Database that the Android app writes to, so changes made by the app (new sightings, location updates) appear on the dashboard within milliseconds.</p>
+
+<div class="term">
+<strong>What is a Single-Page Application (SPA)?</strong> A web application that loads one HTML page and dynamically updates its content using JavaScript, without reloading the entire page. The dashboard is a simple SPA — it consists of one <code>index.html</code> file and one <code>app.js</code> file.
+</div>
+
+<div class="diagram">
+┌────────────────────────────────────────────────────────────┐
+│  Dashboard (Browser)                                       │
+│                                                            │
+│  ┌──────────────────────┐  ┌───────────────────────────┐   │
+│  │                      │  │  Sidebar (420px)           │   │
+│  │                      │  │  ┌─────────┬────────────┐ │   │
+│  │    Leaflet Map       │  │  │ Map Tab │ Add Tool   │ │   │
+│  │    (Full Height)     │  │  ├─────────┴────────────┤ │   │
+│  │                      │  │  │ Filters              │ │   │
+│  │   ● Tool markers     │  │  │ ─────────────────    │ │   │
+│  │   with popups        │  │  │ Tool cards list      │ │   │
+│  │                      │  │  │                      │ │   │
+│  └──────────────────────┘  │  └──────────────────────┘ │   │
+│                            └───────────────────────────┘   │
+└────────────────────────────────────────────────────────────┘
+</div>
+
+<h3>Key Capabilities</h3>
+<ul>
+<li><strong>Real-time tool tracking</strong> — see tool locations update live on the map</li>
+<li><strong>Tool management</strong> — add, delete, map/unmap tags</li>
+<li><strong>Multi-anchor winner selection</strong> — automatically picks the best location when multiple phones detect the same tag</li>
+<li><strong>Advanced filtering</strong> — search by name, tag ID, date range, or map bounds</li>
+<li><strong>Multi-tag-type support</strong> — handles Hilti (decimal), ELA (C ID), EM (MAC), and is extensible for new tag types</li>
+</ul>
+
+<!-- ===== SECTION 2 ===== -->
+<h2 id="d2">2. Technology Stack &amp; Hosting</h2>
+
+<table>
+<tr><th>Technology</th><th>What It Is</th><th>Why It's Used</th></tr>
+<tr><td>Vanilla JavaScript (ES6 Modules)</td><td>Plain JavaScript with modern <code>import</code> syntax, no build step or framework</td><td>Simple, no compilation needed, easy to deploy</td></tr>
+<tr><td>Firebase JS SDK (v10.12.2)</td><td>Google's client library for database access, loaded from CDN</td><td>Real-time data sync with the same database the app uses</td></tr>
+<tr><td>Leaflet.js (v1.9.4)</td><td>Open-source map library</td><td>Displays tool locations on an interactive map with markers</td></tr>
+<tr><td>OpenStreetMap Tiles</td><td>Free map tile provider</td><td>The actual map images (streets, buildings, etc.)</td></tr>
+<tr><td>Firebase Hosting</td><td>Google's static file hosting service</td><td>Deploys the dashboard to a public URL with HTTPS</td></tr>
+</table>
+
+<h3>2.1 File Structure</h3>
+<pre><code>ble-localization-poc/
+├── .firebaserc          <span class="cm">// Firebase project &amp; hosting target config</span>
+├── firebase.json        <span class="cm">// Hosting configuration (rewrites, ignores)</span>
+└── public/
+    ├── index.html       <span class="cm">// Single HTML page with all styles</span>
+    └── app.js           <span class="cm">// All JavaScript logic (~900 lines)</span>
+</code></pre>
+
+<h3>2.2 Firebase Hosting Config</h3>
+<div class="term">
+<strong>What is Firebase Hosting?</strong> A service that takes your static files (HTML, CSS, JS) and serves them on a fast, secure URL. You deploy with a single command (<code>firebase deploy</code>) and it handles HTTPS certificates, CDN caching, and global distribution automatically.
+</div>
+
+<pre><code><span class="cm">// firebase.json</span>
+{
+  <span class="st">"hosting"</span>: {
+    <span class="st">"target"</span>: <span class="st">"ble-localization-poc"</span>,
+    <span class="st">"public"</span>: <span class="st">"public"</span>,           <span class="cm">// Serve files from the public/ folder</span>
+    <span class="st">"rewrites"</span>: [{
+      <span class="st">"source"</span>: <span class="st">"**"</span>,
+      <span class="st">"destination"</span>: <span class="st">"/index.html"</span>  <span class="cm">// All URLs → index.html (SPA)</span>
+    }]
+  }
+}
+</code></pre>
+
+<pre><code><span class="cm">// .firebaserc</span>
+{
+  <span class="st">"projects"</span>: { <span class="st">"default"</span>: <span class="st">"your-project-id"</span> },
+  <span class="st">"targets"</span>: {
+    <span class="st">"your-project-id"</span>: {
+      <span class="st">"hosting"</span>: {
+        <span class="st">"ble-localization-poc"</span>: [<span class="st">"ble-localization-poc"</span>]
+      }
+    }
+  }
+}
+</code></pre>
+
+<!-- ===== SECTION 3 ===== -->
+<h2 id="d3">3. Firebase Configuration &amp; Real-time Listeners</h2>
+
+<h3>3.1 Firebase Connection</h3>
+<p>The dashboard connects to Firebase using the same project as the Android app. The configuration is embedded directly in <code>app.js</code>:</p>
+
+<pre><code><span class="kw">const</span> firebaseConfig = {
+    apiKey: window.__FIREBASE_API_KEY__,
+    authDomain: window.__FIREBASE_AUTH_DOMAIN__,
+    databaseURL: window.__FIREBASE_DATABASE_URL__,
+    projectId: window.__FIREBASE_PROJECT_ID__,
+    storageBucket: window.__FIREBASE_STORAGE_BUCKET__,
+    messagingSenderId: window.__FIREBASE_MESSAGING_SENDER_ID__,
+    appId: window.__FIREBASE_APP_ID__,
+    measurementId: window.__FIREBASE_MEASUREMENT_ID__
+};
+
+<span class="kw">const</span> app = <span class="fn">initializeApp</span>(firebaseConfig);
+<span class="kw">const</span> db = <span class="fn">getDatabase</span>(app);
+</code></pre>
+
+<div class="term">
+<strong>What are these config values?</strong> They identify <em>which</em> Firebase project to connect to. These values are loaded from <code>public/env.js</code> (see README for setup). Security is controlled by Firebase Security Rules on the server side.
+</div>
+
+<h3>3.2 Database References</h3>
+<pre><code><span class="kw">const</span> toolsRef = <span class="fn">ref</span>(db, <span class="st">"ble-localization-poc/tools"</span>);
+<span class="kw">const</span> sightingsRef = <span class="fn">ref</span>(db, <span class="st">"ble-localization-poc/sightings"</span>);
+</code></pre>
+<p>These are the same paths the Android app reads/writes. Both sides share a single source of truth.</p>
+
+<h3>3.3 Real-time Listeners</h3>
+<div class="term">
+<strong>What is <code>onValue</code>?</strong> A Firebase function that sets up a <em>persistent listener</em>. Whenever data at the specified path changes (any child added, modified, or removed), the callback fires with the entire updated snapshot. This is how the dashboard stays in sync without polling.
+</div>
+
+<h4>Tools Listener</h4>
+<pre><code><span class="fn">onValue</span>(toolsRef, (snapshot) => {
+    <span class="kw">const</span> data = snapshot.val();
+    tools = data
+        ? Object.keys(data).map(key => ({ id: key, ...data[key] }))
+        : [];
+
+    <span class="cm">// Update connection indicator</span>
+    statusDot.classList.add(<span class="st">"connected"</span>);
+    statusText.textContent = <span class="st">`Connected - ${tools.length} tool(s)`</span>;
+
+    <span class="fn">computeWinners</span>();   <span class="cm">// Re-calculate best location per tool</span>
+    <span class="fn">applyFilters</span>();     <span class="cm">// Re-render UI with current filters</span>
+});
+</code></pre>
+
+<h4>Sightings Listener</h4>
+<pre><code><span class="fn">onValue</span>(sightingsRef, (snapshot) => {
+    <span class="kw">const</span> data = snapshot.val();
+    sightings = data
+        ? Object.keys(data).map(key => ({ id: key, ...data[key] }))
+        : [];
+
+    <span class="cm">// Recompute winners when sightings change</span>
+    <span class="kw">if</span> (tools.length > <span class="num">0</span>) {
+        <span class="fn">computeWinners</span>();
+        <span class="fn">applyFilters</span>();
+    }
+});
+</code></pre>
+
+<div class="diagram">
+Firebase Database changes
+        │
+        ├─── tools node changed ──▶ onValue callback
+        │                            ├─ Update tools array
+        │                            ├─ computeWinners()
+        │                            └─ applyFilters() → renderTools() + updateMap()
+        │
+        └─── sightings node changed ──▶ onValue callback
+                                         ├─ Update sightings array
+                                         ├─ computeWinners()
+                                         └─ applyFilters() → renderTools() + updateMap()
+</div>
+
+<h3>3.4 Error Handling</h3>
+<p>If the Firebase connection fails, the status indicator turns red and displays the error message. The listeners include an error callback:</p>
+<pre><code><span class="fn">onValue</span>(toolsRef, successCallback, (error) => {
+    statusDot.classList.remove(<span class="st">"connected"</span>);
+    statusText.textContent = <span class="st">"Error: "</span> + error.message;
+});
+</code></pre>
+
+<!-- ===== SECTION 4 ===== -->
+<h2 id="d4">4. Data Structures &amp; State</h2>
+<p>The dashboard maintains all its state in plain JavaScript variables. There is no framework state management — just global variables that are updated when Firebase data arrives.</p>
+
+<h3>4.1 Global State Variables</h3>
+<table>
+<tr><th>Variable</th><th>Type</th><th>Purpose</th></tr>
+<tr><td><code>tools</code></td><td>Array</td><td>All tool objects from Firebase (updated by listener)</td></tr>
+<tr><td><code>filteredTools</code></td><td>Array</td><td>Subset of tools after applying all active filters</td></tr>
+<tr><td><code>sightings</code></td><td>Array</td><td>All sighting records for winner computation</td></tr>
+<tr><td><code>markers</code></td><td>Object</td><td>Map of Leaflet markers keyed by <code>toolId</code></td></tr>
+<tr><td><code>highlightedToolId</code></td><td>String?</td><td>Currently selected/highlighted tool on the map</td></tr>
+<tr><td><code>currentTagType</code></td><td>String</td><td>Selected tag type in the Add Tool form (<code>"hilti"</code>, <code>"ela"</code>, or <code>"em"</code>)</td></tr>
+<tr><td><code>tagSegmentInputs</code></td><td>Array</td><td>DOM references to tag ID input segments</td></tr>
+<tr><td><code>mapBoundsDebounceTimer</code></td><td>Number?</td><td>Timer ID for debounced map bounds filtering</td></tr>
+</table>
+
+<h3>4.2 Tool Object Structure</h3>
+<p>Each tool object in the <code>tools</code> array has these fields. Fields come from Firebase, plus a <code>computed</code> object added by the winner algorithm:</p>
+
+<pre><code>{
+    id:             <span class="st">"firebase-auto-key"</span>,   <span class="cm">// Firebase push key</span>
+    name:           <span class="st">"Hammer Drill"</span>,        <span class="cm">// User-defined name</span>
+    tagUuid:        <span class="st">"d32218666c12"</span>,        <span class="cm">// Mapped tag ID (or null)</span>
+    tagType:        <span class="st">"hilti"</span>,               <span class="cm">// "hilti" | "ela" | "em"</span>
+
+    <span class="cm">// Raw data written by the Android app:</span>
+    lastLat:        <span class="num">6.927079</span>,              <span class="cm">// GPS latitude (0 = unknown)</span>
+    lastLng:        <span class="num">79.861244</span>,             <span class="cm">// GPS longitude</span>
+    lastSeenAt:     <span class="num">1716100234567</span>,         <span class="cm">// Timestamp (ms)</span>
+    lastRssi:       <span class="num">-55</span>,                   <span class="cm">// Signal strength (dBm)</span>
+    lastAnchorId:   <span class="st">"uuid"</span>,                <span class="cm">// Reporting phone's UUID</span>
+    lastAnchorName: <span class="st">"Anchor-Pixel6"</span>,       <span class="cm">// Reporting phone's name</span>
+
+    <span class="cm">// Computed by winner selection (added client-side):</span>
+    computed: {
+        lat:        <span class="num">6.927079</span>,              <span class="cm">// Best location latitude</span>
+        lng:        <span class="num">79.861244</span>,             <span class="cm">// Best location longitude</span>
+        timestamp:  <span class="num">1716100234567</span>,         <span class="cm">// Best sighting time</span>
+        rssi:       <span class="num">-55</span>,                   <span class="cm">// Strongest signal</span>
+        anchorId:   <span class="st">"uuid"</span>,                <span class="cm">// Winning anchor's UUID</span>
+        anchorName: <span class="st">"Anchor-Pixel6"</span>,       <span class="cm">// Winning anchor's name</span>
+        windowSize: <span class="num">3</span>                      <span class="cm">// Number of candidates in window</span>
+    }
+}
+</code></pre>
+
+<div class="card">
+<strong>Why <code>computed</code>?</strong> When multiple phones detect the same tag, each writes its own sighting. The <code>computed</code> object holds the <em>winner</em> — the location from the phone with the strongest signal within a 1-second time window. The dashboard prefers <code>computed</code> data over raw <code>lastLat</code>/<code>lastLng</code> for display.
+</div>
+
+<h3>4.3 Sighting Object Structure</h3>
+<pre><code>{
+    id:         <span class="st">"firebase-auto-key"</span>,   <span class="cm">// Firebase push key</span>
+    tagUuid:    <span class="st">"d32218666c12"</span>,        <span class="cm">// Which tag was seen</span>
+    anchorLat:  <span class="num">6.927079</span>,              <span class="cm">// Where the phone was</span>
+    anchorLng:  <span class="num">79.861244</span>,
+    timestamp:  <span class="num">1716100234567</span>,         <span class="cm">// When it was seen (ms)</span>
+    rssi:       <span class="num">-55</span>,                   <span class="cm">// How strong the signal was</span>
+    anchorId:   <span class="st">"uuid"</span>,                <span class="cm">// Which phone reported it</span>
+    anchorName: <span class="st">"Anchor-Pixel6"</span>        <span class="cm">// Phone's friendly name</span>
+}
+</code></pre>
+
+<h3>4.4 Constants</h3>
+<table>
+<tr><th>Constant</th><th>Value</th><th>Purpose</th></tr>
+<tr><td><code>STRONGEST_WINDOW_MS</code></td><td><code>1000</code></td><td>Time window (ms) for RSSI comparison in winner selection</td></tr>
+<tr><td><code>DEFAULT_MARKER_ICON_URL</code></td><td>Blue marker</td><td>Icon for tools without a mapped tag</td></tr>
+<tr><td><code>TAGGED_MARKER_ICON_URL</code></td><td>Orange marker</td><td>Icon for tools with a mapped tag</td></tr>
+<tr><td><code>HIGHLIGHTED_MARKER_ICON_URL</code></td><td>Red marker</td><td>Icon for the currently selected tool</td></tr>
+</table>
+
+<!-- ===== SECTION 5 ===== -->
+<h2 id="d5">5. Winner Selection Algorithm</h2>
+<p>When multiple Android phones (anchors) detect the same BLE tag, each one writes a sighting to Firebase with its own GPS location. The dashboard must decide <em>which</em> sighting represents the best estimate of the tool's position. This is the <strong>winner selection algorithm</strong>.</p>
+
+<div class="term">
+<strong>What is RSSI?</strong> Received Signal Strength Indicator — a measure of how strong a wireless signal is when received. Measured in dBm (decibels relative to one milliwatt). Values are negative: <code>-40 dBm</code> is a very strong signal (tag is nearby), <code>-90 dBm</code> is very weak (tag is far away). The closer to zero, the stronger the signal and the more accurate the position estimate.
+</div>
+
+<h3>5.1 Algorithm Steps</h3>
+<div class="diagram">
+For each tool with a tagUuid:
+┌─────────────────────────────────────────────────────────────┐
+│ 1. Filter all sightings where tagUuid matches the tool's    │
+│                                                             │
+│ 2. Sort by timestamp descending (most recent first)         │
+│                                                             │
+│ 3. Get the most recent sighting's timestamp (T_max)         │
+│                                                             │
+│ 4. Collect all sightings within [T_max - 1000ms, T_max]     │
+│    (the "time window")                                      │
+│                                                             │
+│ 5. Among those in the window, pick the one with the         │
+│    highest RSSI (strongest signal = closest phone)          │
+│                                                             │
+│ 6. Store the winner's data in tool.computed:                │
+│    { lat, lng, timestamp, rssi, anchorId, anchorName,       │
+│      windowSize }                                           │
+└─────────────────────────────────────────────────────────────┘
+</div>
+
+<h3>5.2 Why This Works</h3>
+<ul>
+<li><strong>Time window</strong> ensures only recent, concurrent sightings are compared — not stale data from minutes ago</li>
+<li><strong>Strongest RSSI</strong> picks the phone that was <em>closest</em> to the tag, which has the most accurate GPS position for it</li>
+<li><strong>No coordination needed</strong> — each phone writes independently; the dashboard resolves conflicts automatically</li>
+</ul>
+
+<h3>5.3 Worked Example</h3>
+<div class="card">
+<strong>Scenario:</strong> Two phones detect the same tag within 300ms of each other.
+
+<table>
+<tr><th>Sighting</th><th>Anchor</th><th>Timestamp</th><th>RSSI</th><th>Location</th></tr>
+<tr><td>A</td><td>Pixel 6</td><td>10:00:00.500</td><td>−55 dBm</td><td>(6.927, 79.861)</td></tr>
+<tr><td>B</td><td>Samsung S23</td><td>10:00:00.800</td><td>−70 dBm</td><td>(6.928, 79.862)</td></tr>
+</table>
+
+<p><strong>Step 3:</strong> Most recent = 10:00:00.800 (Sighting B)</p>
+<p><strong>Step 4:</strong> Window = [10:00:00.000, 10:00:00.800] → Both A and B qualify</p>
+<p><strong>Step 5:</strong> Compare RSSI: −55 &gt; −70 → <strong>Sighting A wins</strong></p>
+<p><strong>Result:</strong> Tool location = (6.927, 79.861) from Pixel 6</p>
+</div>
+
+<h3>5.4 Code</h3>
+<pre><code><span class="kw">function</span> <span class="fn">computeWinners</span>() {
+    tools.forEach(tool => {
+        <span class="kw">if</span> (!tool.tagUuid) { tool.computed = <span class="kw">null</span>; <span class="kw">return</span>; }
+
+        <span class="cm">// Get sightings for this tool's tag</span>
+        <span class="kw">const</span> tagSightings = sightings
+            .filter(s => s.tagUuid === tool.tagUuid)
+            .sort((a, b) => (b.timestamp || <span class="num">0</span>) - (a.timestamp || <span class="num">0</span>));
+
+        <span class="kw">if</span> (tagSightings.length === <span class="num">0</span>) { tool.computed = <span class="kw">null</span>; <span class="kw">return</span>; }
+
+        <span class="kw">const</span> mostRecentTime = tagSightings[<span class="num">0</span>].timestamp || <span class="num">0</span>;
+
+        <span class="cm">// Find all sightings within the 1-second window</span>
+        <span class="kw">const</span> withinWindow = tagSightings.filter(s =>
+            mostRecentTime - (s.timestamp || <span class="num">0</span>) &lt;= STRONGEST_WINDOW_MS
+        );
+
+        <span class="cm">// Pick the one with strongest RSSI</span>
+        <span class="kw">let</span> winner = withinWindow[<span class="num">0</span>];
+        withinWindow.forEach(s => {
+            <span class="kw">if</span> ((s.rssi || <span class="num">-100</span>) > (winner.rssi || <span class="num">-100</span>)) winner = s;
+        });
+
+        tool.computed = {
+            lat: winner.anchorLat, lng: winner.anchorLng,
+            timestamp: winner.timestamp, rssi: winner.rssi,
+            anchorId: winner.anchorId, anchorName: winner.anchorName,
+            windowSize: withinWindow.length
+        };
+    });
+}
+</code></pre>
+
+<!-- ===== SECTION 6 ===== -->
+<h2 id="d6">6. UI Layout &amp; Components</h2>
+
+<h3>6.1 Page Structure</h3>
+<p>The dashboard uses a CSS Grid layout with two columns:</p>
+<table>
+<tr><th>Area</th><th>Width</th><th>Contents</th></tr>
+<tr><td>Map (left)</td><td>Remaining space</td><td>Full-height Leaflet map with tool markers</td></tr>
+<tr><td>Sidebar (right)</td><td>420px fixed</td><td>Tabs, filters, tool cards, add tool form</td></tr>
+</table>
+<p>On screens narrower than 900px, the layout stacks vertically (map on top, 300px tall; sidebar below).</p>
+
+<h3>6.2 Header</h3>
+<ul>
+<li><strong>Title:</strong> "BLE Localization Dashboard"</li>
+<li><strong>Status indicator:</strong> A small dot (green = connected, red = error) with text showing connection status and tool count</li>
+</ul>
+
+<h3>6.3 Sidebar Tabs</h3>
+<p>Two tabs switch between different sidebar content:</p>
+<ul>
+<li><strong>Map Tab</strong> — filters section + scrollable list of tool cards</li>
+<li><strong>Add Tool Tab</strong> — form to create a new tool with a tag already mapped</li>
+</ul>
+<p>Tab switching is handled by toggling CSS <code>.active</code> classes on tab buttons and content panels.</p>
+
+<h3>6.4 Tool Cards</h3>
+<p>Each tool is rendered as a card in the sidebar showing:</p>
+<ul>
+<li><strong>Tool name</strong> (bold header)</li>
+<li><strong>Tag UUID</strong> in display format (decimal for Hilti/EM, "C ID XXXXXX" for ELA), or "No tag mapped" in italic</li>
+<li><strong>Location</strong> — coordinates + formatted timestamp (if available)</li>
+<li><strong>RSSI</strong> — colour-coded signal strength:
+  <ul>
+    <li>Green: stronger than −60 dBm (very close)</li>
+    <li>Orange: between −60 and −80 dBm</li>
+    <li>Red: weaker than −80 dBm (far away)</li>
+  </ul>
+</li>
+<li><strong>Anchor name</strong> — which phone reported the sighting</li>
+<li><strong>3-dot menu (⋮)</strong> — dropdown with "Unmap Tag" and "Delete" options</li>
+</ul>
+<p>Clicking a tool card calls <code>locateTool()</code> to zoom the map to that tool's location.</p>
+
+<!-- ===== SECTION 7 ===== -->
+<h2 id="d7">7. Filtering System</h2>
+<p>The dashboard provides a multi-layered filtering pipeline that narrows down the displayed tools. Filters are combined — each one further reduces the list produced by the previous filter.</p>
+
+<div class="term">
+<strong>What is a Filtering Pipeline?</strong> A chain of filter steps applied one after another. The full list of tools enters at the top, each filter removes tools that don't match, and only the survivors reach the bottom (and get displayed). All filters are applied every time any single filter changes.
+</div>
+
+<div class="diagram">
+All tools
+    │
+    ▼
+┌─────────────────────────┐
+│ 1. Tool Name filter     │  Case-insensitive substring match
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│ 2. Tag UUID filter      │  Matches display format AND raw storage format
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│ 3. Date Range filter    │  From/To datetime + "include missing" toggle
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│ 4. Map Bounds filter    │  Only tools visible in current map viewport
+└────────────┬────────────┘
+             │
+             ▼
+      filteredTools
+             │
+    ┌────────┴────────┐
+    ▼                 ▼
+renderTools()     updateMap()
+</div>
+
+<h3>7.1 Text Search Filters</h3>
+<table>
+<tr><th>Filter</th><th>Input</th><th>Logic</th></tr>
+<tr><td>Tool Name</td><td><code>searchNameInput</code></td><td><code>tool.name.toLowerCase().includes(query)</code></td></tr>
+<tr><td>Tag UUID</td><td><code>searchUuidInput</code></td><td>Matches both the <em>display</em> format (decimal / C ID) and the raw stored <code>tagUuid</code> value (hex), case-insensitive</td></tr>
+</table>
+<p>These filters trigger on every keystroke (<code>input</code> event) for instant results.</p>
+
+<h3>7.2 Date Range Filter</h3>
+<ul>
+<li><strong>From / To:</strong> <code>datetime-local</code> inputs that define a time window</li>
+<li><strong>Include missing:</strong> Checkbox — if checked, tools with no <code>lastSeenAt</code> are included despite the date filter</li>
+<li><strong>Default behaviour:</strong> When no date range is set and "include missing" is unchecked, tools without <code>lastSeenAt</code> are excluded</li>
+</ul>
+
+<h3>7.3 Geographic Filter (Map Bounds)</h3>
+<div class="term">
+<strong>What is Debouncing?</strong> A technique that delays executing a function until the user stops performing an action. When you pan the map, the <code>moveend</code> event fires many times. Debouncing waits 300ms after the last event before applying the filter, preventing excessive re-renders.
+</div>
+
+<ul>
+<li><strong>Toggle:</strong> "Filter by current map bounds" checkbox</li>
+<li><strong>Logic:</strong> Only shows tools whose coordinates fall within the visible map rectangle</li>
+<li><strong>Auto-update:</strong> When enabled, filters re-apply after every map pan or zoom (debounced at 300ms)</li>
+<li><strong>Excludes:</strong> Tools with <code>lastLat == 0 && lastLng == 0</code> (no location)</li>
+</ul>
+
+<h3>7.4 Reset Controls</h3>
+<table>
+<tr><th>Button</th><th>Resets</th></tr>
+<tr><td>Reset (Text Search)</td><td>Name and UUID search fields</td></tr>
+<tr><td>Reset (Date Range)</td><td>From, To fields and "include missing" checkbox</td></tr>
+<tr><td>Reset (Geographic)</td><td>Map bounds toggle</td></tr>
+<tr><td>Show All Tools</td><td>All filters at once</td></tr>
+</table>
+
+<!-- ===== SECTION 8 ===== -->
+<h2 id="d8">8. Map Visualisation</h2>
+
+<div class="term">
+<strong>What is Leaflet.js?</strong> An open-source JavaScript library for interactive maps. It handles rendering map tiles (the actual images of streets, buildings, etc.), placing markers, handling zoom/pan, and showing popups. It's lightweight and widely used as an alternative to Google Maps.
+</div>
+
+<h3>8.1 Map Initialisation</h3>
+<pre><code><span class="kw">const</span> map = L.map(<span class="st">"map"</span>).setView([<span class="num">0</span>, <span class="num">0</span>], <span class="num">3</span>);  <span class="cm">// World view</span>
+L.tileLayer(<span class="st">"https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"</span>, {
+    attribution: <span class="st">'&amp;copy; OpenStreetMap contributors'</span>,
+    maxZoom: <span class="num">22</span>
+}).addTo(map);
+</code></pre>
+<p>The map starts centred on (0, 0) at zoom level 3 (shows most of the world). Once tool data arrives, the view adjusts to show tool locations.</p>
+
+<h3>8.2 Marker Types</h3>
+<table>
+<tr><th>Marker Colour</th><th>Condition</th><th>Z-Index</th></tr>
+<tr><td>Blue (default)</td><td>Tool exists but has no mapped tag</td><td>Normal</td></tr>
+<tr><td>Orange</td><td>Tool has a mapped tag</td><td>Normal</td></tr>
+<tr><td>Red</td><td>Tool is currently highlighted (user clicked it)</td><td>10000 (on top)</td></tr>
+</table>
+
+<h3>8.3 Marker Updates</h3>
+<p>The <code>updateMap()</code> function is called whenever <code>filteredTools</code> changes:</p>
+<ol>
+<li><strong>Remove stale markers</strong> — markers for tools no longer in the filtered list are removed</li>
+<li><strong>Create/update markers</strong> — for each tool with a valid location:
+  <ul>
+    <li>Use <code>computed</code> coordinates if available (winner selection), otherwise fall back to raw <code>lastLat</code>/<code>lastLng</code></li>
+    <li>Recreate the marker each time to ensure the icon colour is correct</li>
+    <li>Bind a popup with tool name, tag UUID, last seen time, RSSI, and anchor name</li>
+  </ul>
+</li>
+</ol>
+
+<h3>8.4 Map Interactions</h3>
+<table>
+<tr><th>Action</th><th>Result</th></tr>
+<tr><td>Click tool card in sidebar</td><td>Map zooms to tool location (level 18), marker highlighted red, popup opens</td></tr>
+<tr><td>Click map background</td><td>Clears current highlight, all markers return to normal colours</td></tr>
+<tr><td>Pan / zoom with bounds filter on</td><td>Filtered tool list updates after 300ms debounce</td></tr>
+<tr><td>Click marker</td><td>Opens popup with tool details</td></tr>
+</table>
+
+<div class="card">
+<strong>Auto-fit disabled:</strong> The map does NOT automatically zoom to fit all markers on every update. This was intentionally disabled because it was annoying — every time a sighting came in, the map would zoom out. Users manually zoom and pan to their area of interest.
+</div>
+
+<!-- ===== SECTION 9 ===== -->
+<h2 id="d9">9. Tool Management</h2>
+
+<h3>9.1 Adding a Tool (Dashboard)</h3>
+<p>The "Add Tool" tab provides a form that creates a tool <em>and</em> maps a tag in one step:</p>
+<ol>
+<li>Enter the <strong>tool name</strong> (required)</li>
+<li>Select the <strong>tag type</strong> (Hilti, ELA, or EM) from a dropdown</li>
+<li>Enter the <strong>tag ID</strong> using the segmented input (see §10)</li>
+<li>Submit → the dashboard:
+  <ul>
+    <li>Converts the tag ID to storage format (<code>formatTagForStorage()</code>)</li>
+    <li>Checks for duplicate tags (scans <code>tools</code> array)</li>
+    <li>Writes to Firebase with <code>push()</code> + <code>set()</code></li>
+  </ul>
+</li>
+</ol>
+
+<pre><code><span class="cm">// What gets written to Firebase on "Add Tool":</span>
+{
+    name:       <span class="st">"Hammer Drill"</span>,
+    tagType:    <span class="st">"hilti"</span>,
+    tagUuid:    <span class="st">"d322126c6618"</span>,   <span class="cm">// Converted from decimal input</span>
+    lastLat:    <span class="num">0</span>,
+    lastLng:    <span class="num">0</span>,
+    lastSeenAt: <span class="kw">null</span>
+}
+</code></pre>
+
+<h3>9.2 Deleting a Tool</h3>
+<p>From the 3-dot menu (⋮) on any tool card:</p>
+<ol>
+<li>Click "Delete"</li>
+<li>Confirm dialog: "Delete &laquo;Tool Name&raquo;? This cannot be undone."</li>
+<li>If confirmed → <code>remove(ref(db, 'ble-localization-poc/tools/{toolId}'))</code></li>
+<li>Firebase listener automatically removes the tool from the UI</li>
+</ol>
+
+<h3>9.3 Unmapping a Tag</h3>
+<p>From the 3-dot menu:</p>
+<ol>
+<li>Click "Unmap Tag" (only visible if a tag is mapped)</li>
+<li><code>update(ref(db, ...), { tagUuid: null })</code></li>
+<li>The tool remains but is no longer linked to any BLE tag</li>
+<li>The Android app will stop updating this tool's location</li>
+</ol>
+
+<h3>9.4 Locating a Tool</h3>
+<p>Clicking anywhere on a tool card (except the menu) calls <code>locateTool(toolId)</code>:</p>
+<ol>
+<li>Finds the tool in the <code>tools</code> array</li>
+<li>Gets coordinates (prefers <code>computed</code>, falls back to raw)</li>
+<li>Sets <code>highlightedToolId</code> → triggers red marker</li>
+<li>Zooms map to the tool's location at zoom level 18</li>
+<li>Opens the marker's popup</li>
+</ol>
+
+<!-- ===== SECTION 10 ===== -->
+<h2 id="d10">10. Tag Input &amp; Format Conversion</h2>
+
+<h3>10.1 Segmented Tag Input</h3>
+<p>The "Add Tool" form uses a specialised segmented input for entering tag IDs — each character gets its own box, similar to how OTP codes are entered. The behaviour changes depending on the selected tag type:</p>
+
+<div class="term">
+<strong>What is a Segmented Input?</strong> A series of individual single-character text boxes arranged in a row. Each box accepts exactly one character, and the cursor automatically advances to the next box after typing. This prevents formatting errors and makes it clear exactly how many characters are expected.
+</div>
+
+<table>
+<tr><th>Tag Type</th><th>Total Segments</th><th>Prefix</th><th>Editable</th><th>Input Mode</th><th>Allowed Characters</th></tr>
+<tr><td>Hilti</td><td>9</td><td>None</td><td>9 digits</td><td>Numeric keyboard</td><td><code>[0-9]</code></td></tr>
+<tr><td>ELA</td><td>9</td><td>"C", "I", "D" (3 boxes, greyed out)</td><td>6 hex chars</td><td>Text keyboard</td><td><code>[0-9A-F]</code></td></tr>
+</table>
+
+<h4>Configuration</h4>
+<pre><code><span class="kw">const</span> TAG_INPUT_CONFIG = {
+    hilti: {
+        totalSegments: <span class="num">9</span>,
+        prefixSegments: <span class="num">0</span>,
+        inputMode: <span class="st">'numeric'</span>,
+        allowedPattern: <span class="st">/[0-9]/</span>
+    },
+    ela: {
+        totalSegments: <span class="num">9</span>,
+        prefixSegments: <span class="num">3</span>,       <span class="cm">// "C", "I", "D" are pre-filled and read-only</span>
+        inputMode: <span class="st">'text'</span>,
+        allowedPattern: <span class="st">/[0-9A-F]/</span>
+    }
+};
+</code></pre>
+
+<h4>Input Behaviour</h4>
+<ul>
+<li><strong>Auto-advance:</strong> After typing a valid character, focus moves to the next box</li>
+<li><strong>Backspace:</strong> If the current box is empty, moves focus to the previous box and clears it</li>
+<li><strong>Arrow keys:</strong> Left/Right to navigate between boxes</li>
+<li><strong>Paste:</strong> Distributes pasted text across boxes starting from the current one</li>
+<li><strong>Validation:</strong> Only allowed characters are accepted; others are silently rejected</li>
+<li><strong>Uppercase:</strong> ELA hex characters are automatically uppercased</li>
+</ul>
+
+<h3>10.2 Format Conversion Functions</h3>
+
+<h4>Display Format (<code>formatTagForDisplay</code>)</h4>
+<p>Converts a stored tag UUID to the human-readable format shown in the UI:</p>
+<table>
+<tr><th>Tag Type</th><th>Stored Value</th><th>Display Value</th><th>Conversion</th></tr>
+<tr><td>Hilti</td><td><code>d322126c6618</code></td><td><code>309257752</code></td><td>Remove prefix → reverse bytes → hex to decimal</td></tr>
+<tr><td>ELA</td><td><code>C ID 015E58</code></td><td><code>C ID 015E58</code></td><td>No conversion (displayed as-is)</td></tr>
+<tr><td>EM</td><td><code>58C35608EEB0</code></td><td><code>194536388608856</code></td><td>Reverse bytes → hex to decimal</td></tr>
+</table>
+
+<h4>Storage Format (<code>formatTagForStorage</code>)</h4>
+<p>Converts user input from the segmented input to the format stored in Firebase:</p>
+<table>
+<tr><th>Tag Type</th><th>User Input</th><th>Stored Value</th><th>Conversion</th></tr>
+<tr><td>Hilti</td><td><code>309257752</code></td><td><code>d322126c6618</code></td><td>Decimal to hex → pad → reverse bytes → add d322</td></tr>
+<tr><td>ELA</td><td><code>015E58</code></td><td><code>C ID 015E58</code></td><td>Prefix with "C ID "</td></tr>
+<tr><td>EM</td><td><code>194536388608856</code></td><td><code>58C35608EEB0</code></td><td>Decimal to hex → pad → reverse bytes</td></tr>
+</table>
+
+<h4>Type Inference (<code>inferTagType</code>)</h4>
+<p>Determines the tag type from its stored UUID: if it starts with <code>"C ID "</code> → ELA, if exactly 12 hex chars and matches MAC pattern → EM, otherwise → Hilti. Used when <code>tagType</code> is not explicitly stored on the tool.</p>
+
+<h3>10.3 Hex ↔ Decimal Conversion (Hilti & EM)</h3>
+<p>These functions mirror the identical algorithms in the Android app (see Android docs §8):</p>
+
+<pre><code><span class="cm">// hexToDecimal: Storage → Display</span>
+<span class="cm">// "d322126c6618" → remove "d322" → "126c6618"</span>
+<span class="cm">// → reverse bytes → "18666c12" → parseInt(hex) → 309257752</span>
+
+<span class="cm">// decimalToHex: Display → Storage</span>
+<span class="cm">// "309257752" → toString(16) → "126c6618"</span>
+<span class="cm">// → padStart(8) → reverse bytes → "18666c12"</span>
+<span class="cm">// → prefix "d322" → "d32218666c12"</span>
+</code></pre>
+
+<h3>10.4 ELA C ID Utilities</h3>
+<pre><code><span class="kw">function</span> <span class="fn">normalizeElaTagId</span>(input) {
+    <span class="cm">// Accepts: "015E58", "CID015E58", "cid015e58"</span>
+    <span class="cm">// Returns: "C ID 015E58" (or null if invalid)</span>
+    <span class="cm">// Requires exactly 6 hex characters [0-9A-F]</span>
+}
+
+<span class="kw">function</span> <span class="fn">isElaTagFormat</span>(tagUuid) {
+    <span class="cm">// Returns true if tagUuid starts with "C ID "</span>
+}
+
+<span class="kw">function</span> <span class="fn">extractHexFromCId</span>(cId) {
+    <span class="cm">// "C ID 015E58" → "015E58"</span>
+}
+</code></pre>
+
+<!-- ===== SECTION 11 ===== -->
+<h2 id="d11">11. Event Handling &amp; Interactions</h2>
+
+<h3>11.1 Form Events</h3>
+<table>
+<tr><th>Event</th><th>Element</th><th>Handler</th></tr>
+<tr><td><code>submit</code></td><td>Add Tool form</td><td>Validates inputs, converts tag, checks duplicates, writes to Firebase</td></tr>
+<tr><td><code>change</code></td><td>Tag type dropdown</td><td>Rebuilds segmented input with new configuration</td></tr>
+<tr><td><code>input</code></td><td>Tag segment inputs</td><td>Validates character, auto-advances to next segment</td></tr>
+<tr><td><code>keydown</code></td><td>Tag segment inputs</td><td>Handles Backspace, ArrowLeft, ArrowRight navigation</td></tr>
+<tr><td><code>paste</code></td><td>Tag segment inputs</td><td>Distributes pasted text across segments</td></tr>
+</table>
+
+<h3>11.2 Filter Events</h3>
+<table>
+<tr><th>Event</th><th>Element</th><th>Handler</th></tr>
+<tr><td><code>input</code></td><td>Name search, UUID search</td><td><code>applyFilters()</code> — real-time filtering</td></tr>
+<tr><td><code>change</code></td><td>Date inputs, checkboxes</td><td><code>applyFilters()</code></td></tr>
+<tr><td><code>click</code></td><td>Reset buttons</td><td>Clear respective filters + <code>applyFilters()</code></td></tr>
+<tr><td><code>click</code></td><td>Show All button</td><td>Clear ALL filters + <code>applyFilters()</code></td></tr>
+</table>
+
+<h3>11.3 Map Events</h3>
+<table>
+<tr><th>Event</th><th>Source</th><th>Handler</th></tr>
+<tr><td><code>moveend</code></td><td>Leaflet map</td><td>If bounds filter enabled → debounced <code>applyFilters()</code> (300ms)</td></tr>
+<tr><td><code>zoomend</code></td><td>Leaflet map</td><td>Same as <code>moveend</code></td></tr>
+<tr><td><code>click</code></td><td>Leaflet map</td><td>Clear <code>highlightedToolId</code>, refresh markers</td></tr>
+</table>
+
+<h3>11.4 Tool Card Events</h3>
+<table>
+<tr><th>Event</th><th>Target</th><th>Handler</th></tr>
+<tr><td><code>click</code> (card body)</td><td>Tool card</td><td><code>locateTool(toolId)</code> — zoom map to tool</td></tr>
+<tr><td><code>click</code> (⋮ button)</td><td>Menu toggle</td><td><code>toggleMenu()</code> — show/hide dropdown, close others</td></tr>
+<tr><td><code>click</code> (Unmap)</td><td>Dropdown item</td><td><code>unmapTag(toolId)</code> — set tagUuid to null</td></tr>
+<tr><td><code>click</code> (Delete)</td><td>Dropdown item</td><td><code>deleteTool(toolId)</code> — confirm + remove</td></tr>
+<tr><td><code>click</code> (outside)</td><td>Document</td><td>Close all open dropdown menus</td></tr>
+</table>
+
+<h3>11.5 Firebase Write Operations Summary</h3>
+<table>
+<tr><th>Operation</th><th>Firebase Method</th><th>Path</th></tr>
+<tr><td>Add tool</td><td><code>push()</code> + <code>set()</code></td><td><code>ble-localization-poc/tools/{new-id}</code></td></tr>
+<tr><td>Delete tool</td><td><code>remove()</code></td><td><code>ble-localization-poc/tools/{toolId}</code></td></tr>
+<tr><td>Unmap tag</td><td><code>update()</code></td><td><code>ble-localization-poc/tools/{toolId}</code></td></tr>
+</table>
+
+<div class="term">
+<strong>What is <code>push()</code>?</strong> A Firebase method that generates a unique key (like <code>-NxYz123abc</code>) and creates a new child node under the specified path. The key is guaranteed to be unique and is sorted chronologically. <code>set()</code> then writes the data to that new key.
+</div>
+
+<h3>11.6 XSS Prevention</h3>
+<div class="term">
+<strong>What is XSS?</strong> Cross-Site Scripting — a security vulnerability where an attacker injects malicious JavaScript into a web page through user input. For example, if a tool name contained <code>&lt;script&gt;alert('hacked')&lt;/script&gt;</code>, it could run when displayed.
+</div>
+<p>All user-provided strings (tool names, tag UUIDs) are escaped before being inserted into HTML using the <code>escapeHtml()</code> function:</p>
+<pre><code><span class="kw">function</span> <span class="fn">escapeHtml</span>(str) {
+    <span class="kw">const</span> div = document.createElement(<span class="st">"div"</span>);
+    div.textContent = str || <span class="st">""</span>;
+    <span class="kw">return</span> div.innerHTML;  <span class="cm">// Automatically escapes &lt;, &gt;, &amp;, etc.</span>
+}
+</code></pre>
+
+<div class="card">
+<strong>Related Documentation:</strong>
+<ul>
+<li><a href="android-app-documentation.html">Android Application Documentation</a> — complete app architecture, BLE scanning, Firebase integration, UI screens</li>
+<li><a href="system-integration-documentation.html">System Integration &amp; Advanced Topics</a> — end-to-end flow, multi-anchor coordination, adding new tag types, glossary</li>
+</ul>
+</div>
+
+</body>
+</html>

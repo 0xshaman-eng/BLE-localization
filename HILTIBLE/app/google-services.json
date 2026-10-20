@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "690693494573",
+    "firebase_url": "https://eelnd-d4121-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "eelnd-d4121",
+    "storage_bucket": "eelnd-d4121.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:690693494573:android:e0273e011ac368ffc4e5a4",
+        "android_client_info": {
+          "package_name": "com.example.hiltible"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB2iC4_tw38fJfMqMQl9PTfPVhGbcL2G8U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
