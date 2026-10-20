@@ -1,4 +1,4 @@
-# SFI BLE Localization — BLE Tool Tracking System
+# BLE Localization — BLE Tool Tracking System
 
 Track physical tools (drills, hammers, grinders, any equipment) on job sites using **Bluetooth Low Energy (BLE) tags**, **Android phones acting as anchors**, and a **real-time web dashboard**.
 
